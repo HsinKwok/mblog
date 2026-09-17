@@ -1,0 +1,205 @@
+/* MBlog · 发布框编辑器样式（前台首页发布框 / 写文章页 / 后台文章编辑共用）
+   结构与尺寸取自 weibo.com 首页 ._box_vkpry_2（2026-09 实测）
+   配色令牌由前台 weibo.css 的 :root 提供，后台单独引用本文件时走 var() 兜底值 */
+
+/* 发布框：结构/尺寸对齐 weibo.com 首页 ._box_vkpry_2（2026-09 实测） */
+.wb-publish { position: relative; padding: 18px 18px 10px; }
+
+/* 输入区 rgb(240,241,244) / 圆角 6px / padding 6px 11px */
+.wb-pub-form {
+  background: var(--wb-input-bg, #f0f1f4);
+  border: 1px solid var(--wb-input-bg, #f0f1f4);
+  border-radius: 6px;
+  padding: 6px 11px;
+}
+.wb-pub-input {
+  display: block; width: 100%; height: 48px;
+  padding: 0 10px 0 0; border: 0; outline: 0; resize: none;
+  background: transparent; color: var(--wb-text, #333);
+  font: 15px/24px var(--wb-font, system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", "Microsoft YaHei", sans-serif);
+  cursor: text;
+}
+.wb-pub-input::placeholder { color: var(--wb-sub, #939393); }
+/* 「写文章」页与后台文章编辑复用发布框编辑器：输入区加高（对齐原 textarea min-height:260px），弹层以编辑器块为锚点 */
+.wb-pub-block { position: relative; }
+.wb-pub-block .wb-pub-input {
+  height: auto; min-height: 260px; padding: 8px 10px 8px 0;
+  overflow-y: auto; resize: vertical;
+}
+/* 写文章页 / 后台编辑页的编辑器置于 .wb-form .field 内，
+   需以更高优先级覆盖 weibo.css 里 .wb-form .field textarea 的通用输入框规则 */
+.wb-form .field .wb-pub-input,
+.wb-form .field .wb-pub-input:focus {
+  min-height: 260px; padding: 8px 10px 8px 0;
+  border: 0; background: transparent; resize: vertical;
+  font: 15px/24px var(--wb-font, system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", "Microsoft YaHei", sans-serif);
+}
+.wb-pub-toolbar {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  height: 20px; margin: 6px 0 2px;
+}
+.wb-pub-count { color: var(--wb-sub, #939393); font-size: 12px; line-height: 14px; }
+.wb-pub-count.over { color: #e64141; }
+/* 内容声明：可点击选择（对齐 weibo.com 输入区右下角） */
+.wb-pub-statement {
+  margin-left: 10px; padding: 0; border: 0; background: none;
+  color: #636363; font: inherit; font-size: 12px; line-height: 14px; cursor: pointer;
+}
+.wb-pub-statement:hover { color: var(--wb-orange, #ff8200); }
+.wb-pub-statement.on { color: var(--wb-orange, #ff8200); }
+
+/* 工具行：图标盒 44×42 / 图标 21px / 间距 17 取自 weibo.com 首页实测 */
+.wb-pub-bar { display: flex; align-items: center; margin: 10px 0 0; }
+/* 负外边距 = 21px 图标在 44px 盒内的左内缩（11.5px），
+   抵消后首个图标的图标左缘与输入区左缘对齐（与图标盒宽度解耦，各断点通用） */
+.wb-pub-icons { display: flex; align-items: center; gap: 17px; margin-left: -11.5px; }
+.wb-pub-icon {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  width: 44px; height: 42px; padding: 0; border: 0; background: none;
+  color: var(--wb-sub, #939393); font: inherit; text-decoration: none; cursor: pointer;
+}
+.wb-pub-svg { display: block; flex: 0 0 auto; width: 21px; height: 21px; fill: currentColor; }
+/* 标签与图标同色（层次不高于图标），字号与同框 .wb-pub-count / .wb-pub-statement 一致为 12px */
+.wb-pub-label { margin: 3px 0 1px; color: inherit; font-size: 12px; line-height: 16px; white-space: nowrap; }
+.wb-pub-icon:hover, .wb-pub-icon:hover .wb-pub-label { color: var(--wb-orange, #ff8200); }
+/* 选中态（面板展开中）：与 .wb-act.on / .wb-pub-statement.on 一致，选中即转主色 */
+.wb-pub-icon.on, .wb-pub-icon.on .wb-pub-label { color: var(--wb-orange, #ff8200); }
+/* 键盘聚焦：主题内控件均以主色替代默认焦点反馈（标签 color:inherit，随之同色） */
+.wb-pub-icon:focus-visible { color: var(--wb-orange, #ff8200); }
+
+/* 分隔线：把右侧「定时 / 可见范围 / 发送」组合推到卡片右端（对齐 weibo.com 实测 x814/851/908） */
+.wb-pub-line { flex: 0 0 1px; width: 1px; height: 18px; margin: 0 12px 0 auto; background: #ebebeb; }
+.wb-pub-timer {
+  display: flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; padding: 0; border: 0; background: none;
+  color: var(--wb-sub, #939393); font: inherit; cursor: default;
+}
+.wb-pub-timer .wb-pub-svg { width: 21px; height: 21px; }
+.wb-pub-limits {
+  display: flex; align-items: center; height: 24px; margin-left: 7px;
+  padding: 0 0 0 4px; border: 0; background: #f9f9f9; border-radius: 3px;
+  color: var(--wb-sub, #939393); font: inherit; cursor: pointer;
+}
+.wb-pub-open { color: var(--wb-sub, #939393); font-size: 12px; line-height: 15px; }
+/* 下拉箭头：对齐 weibo.com _angle_（13×15 容器，可见三角实测 6×4） */
+.wb-pub-caret {
+  position: relative; width: 13px; height: 15px; margin: 1px 0 0;
+}
+.wb-pub-caret::before {
+  content: ''; position: absolute; left: 3px; top: 5px;
+  width: 0; height: 0;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-top: 4px solid var(--wb-sub, #939393);
+}
+/* 无色实心胶囊：border: 0 清零 UA 默认按钮边框（2px outset 灰色立体描边），
+   与同文件 .wb-pub-media-ok / .wb-pub-emoji 等同口径 */
+.wb-pub-send {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 68px; height: 34px; margin-left: 16px; padding: 0 15px;
+  border: 0; border-radius: 36px; background: var(--wb-orange, #ff8200);
+  color: #fff; font-size: 14px; font-weight: 500; line-height: 14px; cursor: pointer;
+}
+/* 禁用态（内容为空）：对齐 weibo.com 实测 opacity .5 / cursor not-allowed */
+.wb-pub-send:disabled { opacity: 0.5; cursor: not-allowed; }
+.wb-pub-send:not(:disabled):hover { background: var(--wb-orange-dark, #e67600); color: #fff; }
+
+/* 发布框弹出面板：表情 / 更多 / 可见范围 / 定时
+   坐标由脚本按鼠标点击位置写入内联 left/top（相对定位上下文 .wb-publish / .wb-pub-block）
+   描边与投影取自主题弹层 .wb-profile-pop：border var(--wb-line) / shadow 0 6px 18px rgba(0,0,0,.12) */
+.wb-pub-panel {
+  position: absolute; left: 0; top: 0; z-index: 20;
+  padding: 10px; background: #fff; border: 1px solid var(--wb-line, #f2f2f2);
+  border-radius: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, .12);
+}
+.wb-pub-emojis { display: grid; grid-template-columns: repeat(10, 1fr); gap: 2px; }
+/* 清零 UA 默认按钮样式（border 2px outset / padding 1px 6px），字体走主题 --wb-font */
+.wb-pub-emoji {
+  width: 30px; height: 30px; padding: 0; border: 0;
+  border-radius: var(--wb-radius, 4px); background: transparent;
+  font: inherit; font-size: 18px; line-height: 1; cursor: pointer;
+}
+.wb-pub-emoji:hover { background: #f5f5f5; }
+/* 键盘聚焦：与 hover 同底色 + 主题主色描边环（对齐 admin.css 的 :focus-visible 写法） */
+.wb-pub-emoji:focus-visible { background: #f5f5f5; box-shadow: 0 0 0 2px rgba(255, 130, 0, .25); outline: 0; }
+.wb-pub-menu { display: flex; flex-direction: column; min-width: 132px; }
+.wb-pub-menu button, .wb-pub-menu a {
+  display: block; padding: 8px 12px; border-radius: 4px;
+  color: var(--wb-text, #333); font-size: 14px; line-height: 18px; text-align: left; cursor: pointer;
+}
+.wb-pub-menu button:hover, .wb-pub-menu a:hover { background: #f5f5f5; color: var(--wb-orange, #ff8200); }
+/* 当前已选项（可见范围） */
+.wb-pub-menu button.on { color: var(--wb-orange, #ff8200); }
+.wb-pub-schedule { display: flex; flex-direction: column; gap: 8px; min-width: 200px; }
+.wb-pub-schedule label { color: var(--wb-sub, #939393); font-size: 12px; }
+.wb-pub-schedule input {
+  height: 32px; padding: 0 8px; border: 1px solid #ebebeb;
+  border-radius: 4px; color: var(--wb-text, #333); font-size: 14px;
+}
+/* 图片 / 视频外链面板：地址输入 + 实时预览 */
+.wb-pub-media { display: flex; flex-direction: column; gap: 8px; width: 320px; }
+.wb-pub-media label { color: var(--wb-sub, #939393); font-size: 12px; }
+.wb-pub-media input {
+  height: 32px; padding: 0 8px; border: 1px solid #ebebeb;
+  border-radius: 4px; color: var(--wb-text, #333); font-size: 14px;
+}
+.wb-pub-media-preview {
+  display: flex; align-items: center; justify-content: center;
+  max-height: 180px; overflow: hidden; border-radius: 6px; background: #f7f7f7;
+}
+.wb-pub-media-preview img, .wb-pub-media-preview video {
+  display: block; width: 100%; max-height: 180px; object-fit: contain;
+}
+.wb-pub-media-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.wb-pub-media-actions button {
+  height: 28px; padding: 0 16px; border: 0; border-radius: 14px;
+  font-size: 13px; line-height: 28px; cursor: pointer;
+}
+.wb-pub-media-cancel { background: #f5f5f5; color: var(--wb-text, #333); }
+.wb-pub-media-cancel:hover { background: #ebebeb; }
+.wb-pub-media-ok { background: var(--wb-orange, #ff8200); color: #fff; }
+.wb-pub-media-ok:hover { background: var(--wb-orange-dark, #e67600); }
+/* 内容声明面板：对齐 weibo.com「选择内容声明」（标题 + 分隔线 + 2 列胶囊按钮） */
+.wb-pub-panel-statement {
+  width: 288px; padding: 0;
+  border-color: #e9e9e9; border-radius: 12px;
+}
+.wb-pub-statement-title {
+  height: 40px; padding: 0 20px;
+  color: #333; font-size: 14px; line-height: 40px;
+}
+.wb-pub-statement-divider { height: 1px; background: #e9e9e9; }
+.wb-pub-statement-list {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  padding: 20px 20px 10px;
+}
+.wb-pub-statement-opt {
+  height: 34px; padding: 0 10px; border: 0; border-radius: 3px;
+  background: #f2f2f2; color: #333;
+  font: inherit; font-size: 14px; line-height: 28px; white-space: nowrap; cursor: pointer;
+}
+.wb-pub-statement-opt:hover { background: #ebebeb; }
+.wb-pub-statement-opt.on { background: rgba(255, 130, 0, 0.1); color: var(--wb-orange, #ff8200); }
+/* 可见范围面板：对齐 weibo.com .woo-pop-main 下拉（白底圆角卡片 + 通栏选项） */
+.wb-pub-panel-scope {
+  width: 220px; padding: 0; margin-top: 8px;
+  border-color: #e9e9e9; border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+.wb-pub-panel-scope .wb-pub-menu { min-width: 0; }
+.wb-pub-panel-scope .wb-pub-menu button {
+  padding: 15px 20px; border: 0; border-radius: 0; background: transparent;
+  color: #333; font-size: 14px; line-height: 14px;
+}
+.wb-pub-panel-scope .wb-pub-menu button:hover { background: #f8f8fb; color: #333; }
+.wb-pub-panel-scope .wb-pub-menu button.on { color: var(--wb-orange, #ff8200); }
+/* 定时按钮激活态：已选择定时时间 */
+.wb-pub-timer.on { color: var(--wb-orange, #ff8200); }
+
+@media (max-width: 560px) {
+  .wb-pub-label { display: none; }
+  /* 标签隐藏后图标盒缩至 38px，左内缩随之变为 (38-21)/2 = 8.5px */
+  .wb-pub-icon { width: 38px; height: 38px; }
+  .wb-pub-icons { gap: 6px; margin-left: -8.5px; }
+  .wb-pub-line { margin: 0 6px 0 auto; }
+}

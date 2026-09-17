@@ -1,0 +1,463 @@
+/* MBlog · 前台样式表：复刻 weibo.com 三栏布局
+   设计令牌取自 weibo.com 登录态实测（2026-09）：
+   主色 rgb(255,130,0) / 正文 rgb(51,51,51) / 次要 rgb(147,147,147)
+   页面底色 rgb(241,242,245) / 卡片描边 rgb(242,242,242) / 卡片圆角 4px / 卡片下间距 8px
+   内容区 1122px 居中（左 182 / 中 642 / 右 282，列间距 8） */
+:root {
+  --wb-orange: #ff8200;
+  --wb-orange-dark: #e67600;
+  --wb-orange-tint: rgba(255, 130, 0, .06);
+  --wb-link: #eb7350;
+  --wb-text: #333;
+  --wb-sub: #939393;
+  --wb-line: #f2f2f2;
+  --wb-bg: #f1f2f5;
+  --wb-input-bg: #f0f1f4;
+  --wb-radius: 4px;
+  --wb-gap: 8px;
+  --wb-font: system-ui, -apple-system, "Segoe UI", Roboto, Ubuntu, Cantarell, "Noto Sans", "Microsoft YaHei", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+/* 滚动条占位：内容超长时出现竖向滚动条也不改变页面宽度 */
+html { scrollbar-gutter: stable; }
+
+body {
+  margin: 0;
+  font: 14px/1.6 var(--wb-font);
+  color: var(--wb-text);
+  background: var(--wb-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--wb-text); text-decoration: none; }
+a:hover { color: var(--wb-orange); }
+img { border: 0; max-width: 100%; }
+ul, li, h1, h2, h3, h4, p { margin: 0; padding: 0; list-style: none; }
+
+/* ---------------- 顶部导航（高 60px） ---------------- */
+.wb-topbar {
+  position: sticky; top: 0; z-index: 100;
+  background: #fff; border-bottom: 1px solid var(--wb-line);
+}
+.wb-topbar-inner {
+  max-width: 1146px; margin: 0 auto; height: 59px; padding: 0 12px;
+  display: flex; align-items: center; gap: 16px;
+}
+.wb-logo { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
+.wb-logo-mark {
+  width: 34px; height: 34px; border-radius: 8px; flex: 0 0 34px;
+  background: var(--wb-orange);
+  color: #fff; font-size: 18px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.wb-logo-txt { font-size: 20px; font-weight: 700; color: var(--wb-text); white-space: nowrap; }
+.wb-logo:hover .wb-logo-txt { color: var(--wb-orange); }
+
+/* 顶栏导航：对齐 weibo.com woo-tab-item-main（项高 57 / 内边距 19px / 右间距 20px / 16px 纯黑） */
+.wb-topnav { display: flex; align-items: center; flex: 1; min-width: 0; }
+.wb-topnav a {
+  display: block; height: 57px; line-height: 57px; padding: 0 19px; margin-right: 20px;
+  color: #000; font-size: 16px; white-space: nowrap;
+}
+.wb-topnav a:hover { color: var(--wb-orange); background: #fafafa; }
+.wb-topnav a.on { color: var(--wb-orange); font-weight: 500; }
+
+/* 下拉菜单导航（后台「导航管理」）：鼠标悬停或键盘聚焦时展开子项 */
+.wb-nav-item { position: relative; }
+.wb-nav-caret {
+  display: inline-block; width: 0; height: 0; margin-left: 6px;
+  border-left: 4px solid transparent; border-right: 4px solid transparent;
+  border-top: 5px solid currentColor; vertical-align: middle;
+}
+.wb-nav-sub {
+  position: absolute; top: 57px; left: 0; z-index: 30;
+  display: none; min-width: 150px; padding: 6px 0;
+  background: #fff; border-radius: 0 0 var(--wb-radius) var(--wb-radius);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .12);
+}
+.wb-nav-item:hover .wb-nav-sub,
+.wb-nav-item:focus-within .wb-nav-sub { display: block; }
+.wb-topnav .wb-nav-sub a {
+  height: 40px; line-height: 40px; padding: 0 18px; margin: 0;
+  font-size: 15px; color: var(--wb-text);
+}
+.wb-topnav .wb-nav-sub a:hover { color: var(--wb-orange); background: #fafafa; }
+
+.wb-search { position: relative; flex: 0 0 200px; width: 200px; }
+.wb-search input {
+  width: 100%; height: 34px; padding: 0 12px 0 33px;
+  border: 1px solid transparent; border-radius: 100px;
+  background: var(--wb-input-bg); font: inherit; font-size: 15px;
+  color: var(--wb-text); outline: none;
+}
+.wb-search input::placeholder { color: #9aa0a6; }
+.wb-search input:focus { background: #fff; border-color: var(--wb-orange); }
+.wb-search button {
+  position: absolute; left: 8px; top: 0; width: 24px; height: 34px; padding: 0;
+  border: 0; background: none; cursor: pointer; font-size: 14px; color: var(--wb-sub);
+}
+.wb-search button:hover { color: var(--wb-orange); }
+
+.wb-topright { margin-left: 8px; display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.wb-topright .wb-user { display: flex; align-items: center; gap: 8px; }
+.wb-topright .wb-user img { width: 32px; height: 32px; border-radius: 50%; }
+.wb-topright .wb-user span { color: var(--wb-text); max-width: 90px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.wb-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 8px 16px; border-radius: 36px; cursor: pointer;
+  border: 1px solid var(--wb-orange); background: #fff; color: var(--wb-orange);
+  font: inherit; font-size: 14px; line-height: 18px; white-space: nowrap; vertical-align: middle;
+}
+.wb-btn:hover { background: var(--wb-orange-tint); color: var(--wb-orange); }
+.wb-btn.p { background: var(--wb-orange); border-color: var(--wb-orange); color: #fff; font-weight: 500; }
+.wb-btn.p:hover { background: var(--wb-orange-dark); border-color: var(--wb-orange-dark); color: #fff; }
+.wb-btn.plain { border-color: transparent; background: #eee; color: var(--wb-sub); }
+.wb-btn.plain:hover { background: #e4e4e4; color: var(--wb-text); }
+.wb-btn.d { border-color: #f0c4c4; background: #fff; color: #c94a4a; }
+.wb-btn.d:hover { background: #fdf3f3; border-color: #e3a8a8; color: #b13c3c; }
+.wb-btn.sm { padding: 4px 12px; font-size: 13px; line-height: 16px; }
+
+/* ---------------- 三栏容器（左 182 / 中 642 / 右 282） ---------------- */
+.wb-container {
+  max-width: 1146px; margin: 8px auto 0; padding: 0 12px 30px;
+  display: grid; grid-template-columns: 182px minmax(0, 1fr) 282px; gap: var(--wb-gap);
+  align-items: start;
+}
+.wb-center { min-width: 0; }
+/* 聚焦式单栏：登录 / 注册 / 提示页隐藏左右两栏，内容整体居中 */
+.wb-container.wb-container-focus { display: block; max-width: 460px; margin-top: 0; padding-bottom: 0; }
+.wb-card {
+  background: #fff; border: 1px solid var(--wb-line); border-radius: var(--wb-radius);
+  margin-bottom: var(--wb-gap);
+}
+/* 卡片内标题（前后台通用） */
+.wb-card h3 { margin: 0 0 14px; font-size: 15px; font-weight: 600; line-height: 1.4; }
+.wb-left, .wb-right { position: sticky; top: 65px; }
+
+/* ---------------- 左侧个人卡 ---------------- */
+.wb-profile { overflow: hidden; text-align: center; padding-bottom: 14px; }
+.wb-profile-cover { height: 76px; background: #ffd9c2 center/cover no-repeat; }
+.wb-profile-avatar {
+  display: block; width: 72px; height: 72px; margin: -38px auto 0;
+  border-radius: 50%; border: 3px solid #fff; overflow: hidden; background: #fff;
+}
+.wb-profile-avatar img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.wb-profile-name { display: inline-block; margin-top: 8px; font-size: 16px; font-weight: 700; color: var(--wb-text); }
+.wb-profile-name:hover { color: var(--wb-orange); }
+.wb-vip {
+  display: inline-block; width: 15px; height: 15px; margin-left: 3px;
+  vertical-align: -2px; border-radius: 50%;
+  background: var(--wb-orange);
+  color: #fff; font-size: 10px; line-height: 15px; text-align: center; font-style: normal;
+}
+/* 等级徽章：图片由后台「等级管理」配置 + 「用户组管理」决定图标集，静态放在 /images/badge/ 下 */
+.wb-vip-img { width: auto; height: auto; background: none; border-radius: 0; line-height: 0; }
+.wb-vip-img img { display: inline-block; width: auto; height: 15px; max-width: 44px; vertical-align: -2px; }
+/* 荣誉图标：用户上存，Gif / Png 均可，与等级徽章各占一个图标位 */
+.wb-honor img { height: 16px; max-width: 52px; }
+.wb-profile-desc { color: var(--wb-sub); font-size: 12px; margin: 6px 12px 0; }
+/* 未登录：居住地 / 生日 */
+.wb-profile-items { margin: 6px 12px 0; text-align: left; }
+.wb-profile-items li { font-size: 12px; line-height: 20px; color: var(--wb-sub); overflow-wrap: anywhere; }
+/* 未登录：「查看更多」链接 */
+.wb-profile-more { display: block; margin-top: 6px; font-size: 12px; color: var(--wb-orange); }
+.wb-profile-stats { display: flex; margin-top: 12px; border-top: 1px solid var(--wb-line); }
+.wb-profile-stats a,
+.wb-profile-stat { flex: 1; padding: 8px 0; }
+.wb-profile-stats a:hover b { color: var(--wb-orange); }
+.wb-profile-stats b { display: block; font-size: 16px; color: var(--wb-text); }
+.wb-profile-stats span { font-size: 12px; color: var(--wb-sub); }
+.wb-profile-act { margin: 12px 12px 0; }
+.wb-profile-act .wb-btn { display: flex; width: 100%; }
+
+/* 未登录：站点地址（取自后台「站点设置 → 站点地址」） */
+.wb-profile-site { display: block; margin: 6px 12px 0; font-size: 12px; color: var(--wb-orange); overflow-wrap: anywhere; }
+/* 未登录：资料卡按钮与菜单（按钮1 悬停出二维码 / 按钮2 链接 / ☰ 菜单） */
+.wb-profile-contact { display: flex; position: relative; margin-top: 12px; border-top: 1px solid var(--wb-line); }
+.wb-profile-contact > * {
+  flex: 1; height: 40px; display: flex; align-items: center; justify-content: center;
+  font-size: 13px; color: var(--wb-sub);
+}
+.wb-profile-contact > *:hover { color: var(--wb-orange); }
+/* 弹层向上展开：卡片为 overflow:hidden，向下会被裁切 */
+.wb-profile-pop {
+  display: none; position: absolute; left: 0; right: 0; bottom: 100%;
+  padding: 8px; background: #fff; border: 1px solid var(--wb-line);
+  border-radius: var(--wb-radius); box-shadow: 0 6px 18px rgba(0, 0, 0, .12);
+}
+.wb-profile-contact > *:hover > .wb-profile-pop { display: block; }
+.wb-profile-pop img { display: block; width: 120px; height: 120px; margin: 0 auto; object-fit: contain; border-radius: var(--wb-radius); }
+/* 资料卡菜单：链接直接平铺在按钮行里显示（不再用 ☰ 悬停弹层） */
+.wb-profile-menu ul { display: flex; gap: 12px; }
+.wb-profile-menu li { list-style: none; }
+.wb-profile-menu a { color: inherit; }
+/* 站点信息页：并入资料卡内的「站点信息」明细区（去掉卡中卡，用与上方按钮行一致的分隔线衔接） */
+.wb-profile .wb-widget {
+  margin: 0; text-align: left;
+  border: 0; border-top: 1px solid var(--wb-line); border-radius: 0;
+}
+.wb-profile .wb-widget-title { padding: 14px 14px 6px; font-size: 15px; font-weight: 600; }
+.wb-profile .wb-widget .wb-table td { padding: 9px 6px; font-size: 13px; }
+.wb-profile .wb-widget .wb-table td:first-child { white-space: nowrap; }
+.wb-profile .wb-widget .wb-table tr:last-child td { border-bottom: 0; }
+/* 站点信息页中心卡：封面加高、底部留白交给明细区，视觉更舒展 */
+.wb-center .wb-profile { padding-bottom: 0; }
+.wb-center .wb-profile-cover { height: 96px; }
+
+/* 左栏导航：对齐 weibo.com _inner_mmtyp_7（项高 40px / 字号 16px / 常规字重） */
+.wb-nav { padding: 4px; }
+.wb-nav a {
+  display: flex; align-items: center; gap: 8px;
+  height: 40px; padding: 0 14px; border-radius: var(--wb-radius);
+  color: var(--wb-text); font-size: 16px; font-weight: 400;
+}
+.wb-nav a:hover { background: #f7f7f7; color: var(--wb-orange); }
+.wb-nav a.on { color: var(--wb-orange); }
+.wb-nav .wb-nav-title {
+  padding: 10px 14px 4px; font-size: 12px; font-weight: 400; color: var(--wb-sub);
+  border-top: 1px solid var(--wb-line); margin-top: 4px;
+}
+
+/* ---------------- 中栏信息流 ---------------- */
+/* 发布框编辑器（.wb-publish / .wb-pub-*）样式见 /style/publisher.css，前后台共用 */
+
+/* 发布结果提示条 */
+.wb-notice {
+  margin-bottom: 8px; padding: 12px 16px; font-size: 14px;
+  border: 1px solid transparent; border-radius: 4px;
+}
+.wb-notice.ok { background: #f2fbf2; border-color: #d8efd8; color: #3c8c3c; }
+.wb-notice.err { background: #fdf3f3; border-color: #f3d9d9; color: #c94a4a; }
+
+/* 发布框发出的短微博：正文直接换行展示 */
+.wb-post-body { color: var(--wb-text); font-size: 15px; line-height: 24px; word-break: break-word; }
+.wb-post-body img, .wb-post-body video { max-width: 100%; border-radius: 6px; margin: 6px 0; }
+
+/* 中栏筛选条：对齐 weibo.com wbpro-tab2（条高 44px / 选项 5px 12px / 圆角 15px） */
+.wb-heading { display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 4px; }
+.wb-heading .tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.wb-heading .tabs a {
+  padding: 5px 12px; border-radius: 15px;
+  color: var(--wb-text); font-size: 15px; line-height: 20px;
+}
+.wb-heading .tabs a:hover { background: #f5f5f5; color: var(--wb-text); }
+.wb-heading .tabs a.on { background: transparent; color: var(--wb-orange); font-weight: 500; }
+.wb-heading .wb-title { font-size: 15px; font-weight: 500; }
+
+.wb-breadcrumb { padding: 12px 16px; color: var(--wb-sub); font-size: 14px; }
+.wb-breadcrumb a { color: var(--wb-sub); }
+.wb-breadcrumb a:hover { color: var(--wb-orange); }
+
+/* 微博正文卡片：对齐 weibo.com _body_ecgcn_63（内容区 padding 16px 18px 0 / 头像 52px / 工具条整行铺满） */
+.wb-post { display: block; padding: 16px 18px 0; }
+.wb-post-row { display: flex; gap: 10px; }
+.wb-post-avatar { flex: 0 0 52px; }
+.wb-post-avatar img { width: 52px; height: 52px; border-radius: 50%; display: block; object-fit: cover; }
+.wb-post-main { flex: 1; min-width: 0; }
+.wb-post-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; line-height: 20px; color: var(--wb-sub); }
+.wb-post-name { font-size: 15px; font-weight: 700; color: var(--wb-text); }
+.wb-post-name:hover { color: var(--wb-orange); }
+.wb-post-head .sep { color: #d9d9d9; }
+.wb-post-head a { color: var(--wb-sub); }
+.wb-post-head a:hover { color: var(--wb-orange); }
+
+.wb-post-text { margin-top: 6px; font-size: 15px; line-height: 24px; color: var(--wb-text); word-break: break-word; }
+.wb-post-text img { display: block; margin-top: 8px; max-width: 100%; border-radius: var(--wb-radius); }
+.wb-post-text .cover { max-height: 320px; object-fit: cover; }
+.wb-post-title { font-size: 16px; font-weight: 500; margin: 0 0 6px; }
+.wb-post-title a { color: var(--wb-text); }
+.wb-post-title a:hover { color: var(--wb-orange); }
+
+/* 摘要「阅读更多」：正文超 200 字时出现，跳转文章详情 */
+.wb-readmore { color: var(--wb-link); }
+.wb-readmore:hover { color: var(--wb-orange); }
+
+.wb-repost {
+  margin-top: 8px; padding: 10px 12px; background: #f7f7f7;
+  border-radius: var(--wb-radius); font-size: 14px; color: var(--wb-sub);
+}
+.wb-repost .src-name { color: var(--wb-orange); font-weight: 500; }
+.wb-repost .src-text { margin-top: 4px; color: var(--wb-sub); }
+
+.wb-topics { margin-top: 8px; font-size: 14px; }
+.wb-topics a { color: var(--wb-link); margin-right: 8px; }
+.wb-topics a:hover { color: var(--wb-orange); }
+
+/* 内容声明标签（信息流卡片） */
+.wb-statement {
+  display: inline-block; margin-top: 8px; padding: 0 6px;
+  border: 1px solid #ebebeb; border-radius: 3px;
+  color: var(--wb-sub); font-size: 12px; line-height: 18px;
+}
+
+/* 置顶标识：同步后台 is_top 状态（信息流卡片右上角 / 详情页标题旁 / 我的文章列表） */
+.wb-top-tag {
+  display: inline-block; margin-left: 6px; padding: 0 6px;
+  border: 1px solid #ffd7b5; border-radius: 3px;
+  background: #fff7f0; color: var(--wb-orange);
+  font-size: 12px; font-weight: 400; line-height: 18px; vertical-align: middle;
+}
+.wb-post-head .wb-top-tag { margin-left: auto; }
+
+/* 互动工具条：对齐 weibo.com _main_198pe_12（三项均分 / 项高 40px / 灰度 #808080） */
+.wb-post-actions { display: flex; align-items: center; margin-top: 8px; }
+/* 信息流卡片：工具条与卡片同宽（原生 footer 640×40 铺满） */
+.wb-post .wb-post-actions { margin: 0 -18px; }
+.wb-post-actions .wb-act-form { flex: 1; display: flex; }
+.wb-act {
+  flex: 1; border: 0; background: none; cursor: pointer; font: inherit;
+  font-size: 14px; color: #808080; height: 40px;
+  display: flex; align-items: center; justify-content: center;
+}
+.wb-act:hover { color: var(--wb-orange); }
+.wb-act.on { color: var(--wb-orange); font-weight: 500; }
+a.wb-act { text-align: center; }
+.wb-act i { font-style: normal; margin-right: 4px; }
+
+.wb-pager { display: flex; justify-content: center; align-items: center; gap: 10px; padding: 14px; color: var(--wb-sub); }
+.wb-empty { padding: 40px 16px; text-align: center; color: var(--wb-sub); }
+
+/* ---------------- 右栏（对齐 weibo.com woo-panel / _tit_6gjua_10 / wbpro-side-panel） ---------------- */
+.wb-widget { padding: 0; }
+.wb-widget-title {
+  font-size: 16px; font-weight: 500; line-height: 22px;
+  padding: 14px 14px 13px;
+}
+.wb-widget-title .more { float: right; font-size: 13px; font-weight: 400; color: var(--wb-sub); }
+.wb-topic-list a {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  height: 40px; padding: 0 14px; font-size: 14px; color: var(--wb-text);
+}
+.wb-topic-list a:hover { color: var(--wb-orange); }
+.wb-topic-list .n { color: var(--wb-sub); font-size: 13px; }
+
+.wb-cmt { display: flex; gap: 10px; padding: 8px 14px; }
+.wb-cmt img { width: 40px; height: 40px; border-radius: 50%; flex: 0 0 40px; }
+.wb-cmt .cn { font-size: 14px; color: var(--wb-link); }
+.wb-cmt .ct { font-size: 13px; color: var(--wb-sub); margin-top: 2px; }
+
+.wb-link-item { display: flex; gap: 10px; padding: 8px 14px; }
+/* 友链图标统一为 40×40 方框：contain + 内边距，横图竖图 favicon 都完整显示、不被裁切 */
+/* 图标外层是 <a> 时它才是 flex 项，必须锁死宽度；否则会被长描述挤压，图片再被 max-width:100% 压小 */
+.wb-link-item > a { flex: 0 0 40px; }
+.wb-link-item img { display: block; width: 40px; height: 40px; padding: 4px; border-radius: var(--wb-radius); object-fit: contain; flex: 0 0 40px; background: #f5f5f5; }
+.wb-link-item .ln { font-size: 14px; font-weight: 500; }
+.wb-link-item .ld { font-size: 13px; color: var(--wb-sub); }
+
+/* ---------------- 文章详情 ---------------- */
+.wb-article { padding: 20px 24px; }
+.wb-article h1 { font-size: 22px; font-weight: 600; line-height: 1.4; margin-bottom: 12px; }
+.wb-article .wb-article-meta {
+  display: flex; flex-wrap: wrap; gap: 12px; color: var(--wb-sub); font-size: 14px;
+  padding-bottom: 12px; border-bottom: 1px solid var(--wb-line); margin-bottom: 16px;
+}
+.wb-article .wb-article-meta a { color: var(--wb-orange); }
+.wb-article .entry-content { font-size: 15px; line-height: 1.9; color: var(--wb-text); word-break: break-word; }
+.wb-article .entry-content img { max-width: 100%; border-radius: var(--wb-radius); margin: 8px 0; }
+.wb-article .entry-content p { margin: 0 0 12px; }
+
+.wb-comment-item { display: flex; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--wb-line); }
+.wb-comment-item:last-of-type { border-bottom: 0; }
+.wb-comment-item img { width: 40px; height: 40px; border-radius: 50%; flex: 0 0 40px; }
+.wb-comment-item .cc { font-size: 15px; color: var(--wb-text); word-break: break-word; }
+.wb-comment-item .cm { font-size: 13px; color: var(--wb-sub); margin-top: 4px; }
+.wb-comment-item .cm a { color: var(--wb-link); }
+.wb-comment-form { padding: 14px 0 0; }
+.wb-comment-form textarea {
+  width: 100%; min-height: 80px; padding: 10px 12px; font: inherit; font-size: 15px;
+  border: 1px solid var(--wb-line); border-radius: var(--wb-radius);
+  background: var(--wb-input-bg); resize: vertical; outline: none;
+}
+.wb-comment-form textarea:focus { border-color: var(--wb-orange); background: #fff; }
+.wb-comment-form .row { display: flex; gap: 10px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+.wb-comment-form .row input.text {
+  flex: 1; min-width: 140px; height: 34px; padding: 0 12px; font: inherit;
+  border: 1px solid var(--wb-line); border-radius: var(--wb-radius);
+  background: var(--wb-input-bg); outline: none;
+}
+.wb-comment-form .row input.text:focus { border-color: var(--wb-orange); background: #fff; }
+.wb-comment-form .submit { display: flex; justify-content: flex-end; margin-top: 10px; }
+
+/* ---------------- 表单 / 提示页 ---------------- */
+.wb-form { padding: 20px 24px; max-width: 460px; }
+.wb-form h1 { font-size: 20px; font-weight: 600; margin-bottom: 6px; }
+.wb-form .tip { color: var(--wb-sub); font-size: 14px; margin-bottom: 16px; }
+.wb-form .field { margin-bottom: 12px; }
+.wb-form .field input, .wb-form .field select, .wb-form .field textarea {
+  width: 100%; padding: 9px 12px; font: inherit; font-size: 15px; color: var(--wb-text);
+  border: 1px solid var(--wb-line); border-radius: var(--wb-radius);
+  background: var(--wb-input-bg); outline: none;
+}
+.wb-form .field input:focus, .wb-form .field select:focus, .wb-form .field textarea:focus { border-color: var(--wb-orange); background: #fff; }
+.wb-form .field label { display: block; font-size: 13px; color: var(--wb-text); margin-bottom: 5px; }
+.wb-form textarea { min-height: 120px; resize: vertical; }
+/* 错误 / 成功提示：既可能是 .wb-form.err（提示条与表单同元素），也可能是 .wb-form .err（表单内部子元素） */
+.wb-form .err, .wb-form.err { color: #e51c23; font-size: 13px; margin-bottom: 10px; }
+.wb-form .ok, .wb-form.ok { color: #9a6700; font-size: 13px; margin-bottom: 10px; }
+.wb-form h2 {
+  font-size: 16px; font-weight: 600; margin: 18px 0 10px; padding-top: 14px;
+  border-top: 1px solid var(--wb-line);
+}
+.wb-form-wide { max-width: none; }
+
+/* 表单助手类（前后台共用） */
+.inline { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.muted { color: var(--wb-sub); font-size: 12px; }
+.hint { color: var(--wb-sub); font-size: 12px; margin-top: 4px; }
+
+/* 个人设置页头像预览 */
+.wb-set-preview { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.wb-set-preview img { width: 48px; height: 48px; border-radius: 50%; }
+
+/* ---------------- 登录框（前台登录 / 注册 / 后台登录共用） ---------------- */
+.wb-login {
+  display: flex; align-items: center; justify-content: center;
+  min-height: calc(100vh - 131px); /* 100vh 减去 60px 顶栏与 71px 页脚，页面不出现滚动条 */
+  padding: 30px 0;
+}
+.wb-login-box { width: 340px; max-width: 100%; margin: 0; }
+.wb-login-box .wb-notice { margin-bottom: 14px; }
+
+.wb-table { width: 100%; border-collapse: collapse; }
+.wb-table th, .wb-table thead td {
+  padding: 10px 6px; border-bottom: 1px solid var(--wb-line);
+  text-align: left; font-size: 13px; font-weight: 600; color: #5b6472; white-space: nowrap;
+}
+.wb-table td { padding: 12px 6px; border-bottom: 1px solid var(--wb-line); vertical-align: top; font-size: 14px; }
+.wb-table a { color: var(--wb-text); }
+.wb-table a:hover { color: var(--wb-orange); }
+.wb-pill {
+  display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px;
+  background: #eef0f3; color: #5b6472;
+}
+.wb-pill.publish { background: #e6f7ec; color: #1a7f37; }
+.wb-pill.pending { background: #fff6e5; color: #9a6700; }
+.wb-pill.draft { background: #eef0f3; color: #5b6472; }
+.wb-pill.private { background: #f1eefd; color: #5f4bb6; }
+
+/* ---------------- 页脚 ---------------- */
+.wb-footer {
+  padding: 20px 12px 30px; text-align: center; color: var(--wb-sub); font-size: 13px;
+}
+.wb-footer a { color: var(--wb-sub); }
+.wb-footer a:hover { color: var(--wb-orange); }
+
+/* ---------------- 响应式 ---------------- */
+@media (max-width: 1080px) {
+  .wb-container { grid-template-columns: 182px minmax(0, 1fr); }
+  .wb-right { display: none; }
+  .wb-topnav { display: none; }
+  .wb-search { margin-left: auto; }
+}
+@media (max-width: 760px) {
+  .wb-container { grid-template-columns: minmax(0, 1fr); }
+  .wb-left { display: none; }
+  .wb-topbar-inner { gap: 12px; }
+  .wb-topright .wb-user span { display: none; }
+  .wb-search { flex: 1 1 auto; width: auto; max-width: none; }
+  .cols { grid-template-columns: 1fr; }
+}

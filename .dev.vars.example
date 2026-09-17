@@ -1,0 +1,7 @@
+# 复制为 .dev.vars 后使用（该文件已被 .gitignore 忽略，切勿提交到仓库）
+# 线上部署请改用：wrangler secret put SESSION_SECRET
+#
+# 生成一个随机密钥：
+#   PowerShell: -join ((1..64) | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })
+#   或使用任意 32 字节以上的随机字符串
+SESSION_SECRET=请替换为随机生成的密钥

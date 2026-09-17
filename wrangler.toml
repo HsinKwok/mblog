@@ -1,0 +1,31 @@
+# MBlog - Cloudflare Workers 配置
+
+name = "mblog"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+# 自定义域名（可选）：改成你自己的域名后取消注释。
+# 需该域名所在 zone 已托管在本账号下，Wrangler 会自动创建对应 DNS 记录。
+# 不配置时 Worker 使用默认的 *.workers.dev 域名访问。
+# routes = [
+#   { pattern = "example.com", custom_domain = true },
+#   { pattern = "www.example.com", custom_domain = true },
+# ]
+
+# 会话签名密钥不写在本文件，避免随仓库泄露后他人可伪造任意身份：
+#   本地开发：在项目根目录 .dev.vars 中写 SESSION_SECRET=<随机字符串>（该文件已被 .gitignore 忽略）
+#   线上部署：wrangler secret put SESSION_SECRET
+
+# D1 数据库
+# database_id 需替换为你自己创建后得到的真实 ID：
+#   wrangler d1 create mblog
+# 本地开发（--local）用占位 ID 也能跑通，远程部署必须填真实 ID。
+[[d1_databases]]
+binding = "DB"
+database_name = "mblog"
+database_id = "<YOUR_D1_DATABASE_ID>"
+
+# 静态资源目录
+[assets]
+directory = "./public"
+binding = "ASSETS"
