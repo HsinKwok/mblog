@@ -7,7 +7,6 @@ import {
   redirect,
   backMsg,
   backErr,
-  noticeOf,
   errorOf,
   escapeHtml as e,
   safeUrl,
@@ -15,7 +14,6 @@ import {
   listField,
   intField,
   intParam,
-  toInt,
   readForm,
   pageInfo,
   statusFilter,
@@ -36,8 +34,6 @@ import {
   countOf,
   run,
   getOptions,
-  saveOptions,
-  DEFAULT_OPTIONS,
   createSession,
   clearSession,
   getSession,
@@ -67,7 +63,6 @@ import {
   getGroups,
   getLevels,
   resolveGroup,
-  groupById,
   badgeFile,
   iconImageTag,
   BADGE_DIR,
@@ -78,352 +73,37 @@ import {
   POST_COUNT_COLUMNS,
   clearLoginFailuresOf,
 } from './lib.js';
-import { head, topbar, footer, pubBody, PUB_SCRIPT } from './theme.js';
-
-/**
- * 后台左栏菜单。
- * key 同时是「组别管理 → 后台菜单」的取值（user_group.admin_menus，逗号分隔）与路由鉴权的依据；
- * path 为该菜单负责的路由前缀（含其下的新增 / 保存 / 删除 / 批量删除等子路由），
- * dashboard 用 exact 精确匹配，否则 '/admin' 会前缀命中所有后台路径。
- * 数组顺序即左栏显示顺序，新增菜单时同步更新 schema.sql 中 admin_menus 的取值说明。
- */
-const MENUS = [
-  { key: 'dashboard', href: '/admin', label: '仪表盘', path: '/admin', exact: true },
-  { key: 'posts', href: '/admin/posts', label: '文章管理', path: '/admin/posts' },
-  { key: 'pages', href: '/admin/pages', label: '独立页面', path: '/admin/pages' },
-  { key: 'comments', href: '/admin/comments', label: '评论管理', path: '/admin/comments' },
-  { key: 'likes', href: '/admin/likes', label: '点赞管理', path: '/admin/likes' },
-  { key: 'follows', href: '/admin/follows', label: '关注管理', path: '/admin/follows' },
-  { key: 'categories', href: '/admin/categories', label: '分类管理', path: '/admin/categories' },
-  { key: 'tags', href: '/admin/tags', label: '标签管理', path: '/admin/tags' },
-  { key: 'links', href: '/admin/links', label: '友链管理', path: '/admin/links' },
-  { key: 'users', href: '/admin/users', label: '用户管理', path: '/admin/users' },
-  { key: 'groups', href: '/admin/groups', label: '组别管理', path: '/admin/groups' },
-  { key: 'levels', href: '/admin/levels', label: '等级管理', path: '/admin/levels' },
-  { key: 'profile', href: '/admin/profile', label: '我的资料', path: '/admin/profile' },
-  { key: 'features', href: '/admin/features', label: '功能管理', path: '/admin/features' },
-  { key: 'nav', href: '/admin/nav', label: '导航管理', path: '/admin/nav' },
-  { key: 'options', href: '/admin/options', label: '站点设置', path: '/admin/options' },
-];
-
-const MENU_KEYS = MENUS.map((m) => m.key);
-
-/** 路径所属的菜单；不属于任何菜单（如 /admin/init）时返回 null */
-function menuOfPath(path) {
-  return (
-    MENUS.find((m) => (m.exact ? path === m.path || path === `${m.path}/` : path === m.path || path.startsWith(`${m.path}/`))) ||
-    null
-  );
-}
-
-/**
- * 当前管理员可见的后台菜单 key 集合，依据其所属用户组（user_group.admin_menus）。
- * 返回 null 表示全部可见：'*' / 空串是「全部」的写法，组被删或读组失败时也按全部处理
- * （能进后台的账号 role 必为 administrator，此处不是权限边界，而是入口的组织方式，故失败时放开而非锁死）。
- */
-async function visibleMenuKeys(env, user) {
-  const group = groupById(await getGroups(env), user.group_id);
-  const raw = String((group && group.admin_menus) || '').trim();
-  if (!raw || raw === '*') return null;
-  const allowed = new Set(MENU_KEYS);
-  const keys = raw
-    .split(',')
-    .map((k) => k.trim())
-    .filter((k) => allowed.has(k));
-  // 勾选项全是无效 key（只可能来自直连数据库的脏数据）时按「全部可见」处理，
-  // 与 '*' / 组被删同一口径，避免左栏空白且每个菜单都 403 的死局
-  if (!keys.length) return null;
-  return new Set(keys);
-}
-
-/* ---------------- 布局（复用前台 head / topbar / footer 与 .wb-* 组件） ---------------- */
-
-/** 后台专用样式，仅补充两栏骨架等，其余组件全部复用前台 weibo.css */
-const ADMIN_CSS = '<link rel="stylesheet" href="/style/admin.css" type="text/css">';
-
-/**
- * 批量删除脚本（各列表页共用）。
- * 勾选框与提交按钮通过 form 属性关联到批量表单，避免与行内删除表单嵌套。
- */
-const BULK_SCRIPT = `<script>
-(function () {
-  function boxes(id) {
-    return Array.prototype.slice.call(document.querySelectorAll('input[name="ids"][form="' + id + '"]'));
-  }
-  document.addEventListener('change', function (ev) {
-    var box = ev.target;
-    // data-bulk 是无值属性，dataset.bulk 会得到空串（假值），必须用 hasAttribute 判断
-    if (box.type !== 'checkbox' || !box.form || !box.form.hasAttribute('data-bulk')) return;
-    var id = box.form.id;
-    if (box.hasAttribute('data-check-all')) {
-      boxes(id).forEach(function (b) { b.checked = box.checked; });
-      return;
-    }
-    if (box.name !== 'ids') return;
-    var all = document.querySelector('[data-check-all][form="' + id + '"]');
-    if (!all) return;
-    var list = boxes(id);
-    all.checked = list.length > 0 && list.every(function (b) { return b.checked; });
-  });
-  document.addEventListener('submit', function (ev) {
-    var form = ev.target;
-    if (!form.hasAttribute || !form.hasAttribute('data-bulk')) return;
-    var checked = boxes(form.id).filter(function (b) { return b.checked; });
-    if (!checked.length) {
-      ev.preventDefault();
-      alert('请先勾选要删除的记录');
-      return;
-    }
-    if (!confirm('确定删除选中的 ' + checked.length + ' 条记录吗？此操作不可恢复。')) ev.preventDefault();
-  });
-})();
-</script>`;
-
-/** 后台页面外框：head（含后台样式）+ 顶栏 + 主体 + 页脚，登录页与后台各页共用 */
-function pageFrame(options, user, title, content, navRows = []) {
-  return `${head(options, `${title} · 后台`, ADMIN_CSS)}
-${topbar(options, user, '', navRows)}
-${content}
-${footer(options)}`;
-}
-
-function layout(options, user, active, title, body, notice = '', navRows = [], menus = null) {
-  const nav = MENUS.filter((m) => !menus || menus.has(m.key))
-    .map((m) => `<a href="${m.href}" class="${active === m.href ? 'on' : ''}">${m.label}</a>`)
-    .join('\n      ');
-  const content = `<div class="wb-container wb-container-admin">
-  <aside class="wb-left">
-    <div class="wb-card wb-nav wb-nav-admin">
-      <div class="wb-nav-title">后台管理</div>
-      ${nav}
-    </div>
-  </aside>
-  <main class="wb-center" data-soft="admin">
-    ${notice}
-    ${body}
-  </main>
-</div>
-${BULK_SCRIPT}`;
-  return pageFrame(options, user, title, content, navRows);
-}
-
-function noticeFrom(url) {
-  const msg = noticeOf(url);
-  const err = errorOf(url);
-  if (msg) return `<div class="wb-notice ok">${e(msg)}</div>`;
-  if (err) return `<div class="wb-notice err">${e(err)}</div>`;
-  return '';
-}
-
-/** 渲染后台页面；传入 url 时自动带出 msg/err 提示 */
-async function adminPage(env, user, active, title, body, url = null, status = 200) {
-  const [options, navRows, menus] = await Promise.all([
-    getOptions(env),
-    all(env, 'SELECT * FROM nav ORDER BY ordernum, nid'),
-    visibleMenuKeys(env, user),
-  ]);
-  return html(layout(options, user, active, title, body, url ? noticeFrom(url) : '', navRows, menus), status);
-}
-
-/** 列表空态行（各列表页共用）：避免无数据时渲染出一个只有表头的空表格 */
-function emptyRow(colspan, text) {
-  return `<tr><td colspan="${colspan}" class="muted">${text}</td></tr>`;
-}
-
-/** 查不到目标（记录 / 后台页面）时的 404 提示页（各编辑表单与后台路由共用） */
-function missingPage(env, user, back, title, label, backText = '返回列表') {
-  return adminPage(
-    env,
-    user,
-    back,
-    title,
-    `<div class="wb-card wb-card-pad">${label}不存在。<p style="margin-top:12px"><a class="wb-btn" href="${back}">${backText}</a></p></div>`,
-    null,
-    404
-  );
-}
-
-/** 列表行内的删除表单（各列表页共用）；confirmText 为删除前的确认文案 */
-function deleteForm(action, key, value, confirmText) {
-  return `<form method="post" action="${action}" onsubmit="return confirm('${confirmText}');" style="display:inline">
-          <input type="hidden" name="${key}" value="${e(value)}"><button class="wb-btn d sm" type="submit">删除</button></form>`;
-}
-
-/**
- * 列表行内的审核二态表单（文章审核、评论与用户共用）。
- * - 待审（status === 'pending'）时渲染「通过」，目标状态为 active；
- *   传 reject 时在「通过」后再渲染一个「驳回」表单（文章审核用，目标状态由 reject.status 指定）。
- * - 非待审时渲染「转为待审」；idleText 传空串表示不渲染任何按钮（文章列表只在待审行给出审核按钮）。
- * - extra 为随表单一起提交的额外隐藏字段（文章列表用它保留当前筛选状态，便于审核后跳回原位）。
- */
-function statusToggle({ action, name, value, status, active, extra = {}, idleText = '转为待审', reject = null }) {
-  const hidden =
-    `<input type="hidden" name="${name}" value="${e(value)}">` +
-    Object.entries(extra)
-      .map(([k, v]) => `<input type="hidden" name="${e(k)}" value="${e(v)}">`)
-      .join('');
-  const button = (to, label, cls) =>
-    `<form method="post" action="${action}" style="display:inline">${hidden}<input type="hidden" name="status" value="${e(to)}"><button class="wb-btn${cls ? ` ${cls}` : ''} sm" type="submit">${e(label)}</button></form>`;
-  if (status === 'pending') {
-    return `${button(active, '通过', 'p')}${reject ? button(reject.status, reject.label, '') : ''}`;
-  }
-  return idleText ? button('pending', idleText, '') : '';
-}
-
-/* ---------------- 批量删除（各列表页共用） ---------------- */
-
-/** 批量表单容器：勾选框与按钮用 form 属性关联，避免与行内表单嵌套 */
-function bulkForm(id, action) {
-  return `<form id="${id}" method="post" action="${action}" data-bulk></form>`;
-}
-
-/** 批量删除按钮 */
-function bulkButton(id) {
-  return `<button class="wb-btn d" type="submit" form="${id}">批量删除</button>`;
-}
-
-/** 表头全选框 */
-function bulkCheckAll(id) {
-  return `<th class="wb-check"><input type="checkbox" data-check-all form="${id}" title="全选"></th>`;
-}
-
-/** 行勾选框 */
-function bulkCheck(id, value) {
-  return `<td class="wb-check"><input type="checkbox" name="ids" value="${e(value)}" form="${id}" title="选择"></td>`;
-}
-
-/** 解析勾选的 ID（同名多值，兼容 JSON 数组），过滤非法值 */
-function bulkIds(form) {
-  const raw = typeof form.getAll === 'function' ? form.getAll('ids') : [].concat(form.get('ids') ?? []);
-  return raw.map((v) => toInt(v, 0)).filter((n) => n > 0);
-}
-
-/**
- * 批量删除：逐个执行 done，然后回跳列表；未勾选时给出提示。
- * done 返回 false 表示该条被保护规则跳过（如不能删除当前登录账号）；
- * 返回 D1 结果且一行未命中时同样不计入成功，避免把「已不存在」的 id 也算成删除成功。
- */
-async function bulkDelete(request, back, done) {
-  const ids = bulkIds(await readForm(request));
-  if (!ids.length) return backErr(back, '请先勾选要删除的记录');
-  let count = 0;
-  for (const id of ids) {
-    const res = await done(id);
-    if (res !== false && changed(res)) count += 1;
-  }
-  if (!count) return backErr(back, '没有可删除的记录（可能受保护规则限制或已被删除）');
-  const skipped = ids.length - count;
-  const msg = skipped ? `已删除 ${count} 条记录，跳过 ${skipped} 条（受保护或已不存在）` : `已删除 ${count} 条记录`;
-  return backMsg(back, msg);
-}
-
-/**
- * 后台列表页骨架：批量表单 + 工具条 + 表格（含空态、表尾说明）+ 分页条。
- * 各列表页只负责查询、工具条、表头与行渲染，避免 11 处重复同一段结构。
- * rows 为已渲染的行 HTML 数组；prepend 为不受空态影响的固定行（如系统内置页面）。
- */
-function listShell({ bulkId, bulkAction, tools = '', toolsStyle = '', head, rows = [], prepend = '', colspan, emptyText, hint = '', foot = '' }) {
-  const tableRows = rows.length ? rows.join('') : emptyRow(colspan, emptyText);
-  return `
-  ${bulkForm(bulkId, bulkAction)}
-  <div class="wb-card wb-admin-tools"${toolsStyle ? ` style="${toolsStyle}"` : ''}>
-    ${tools}
-  </div>
-  <div class="wb-card wb-card-pad">
-  <table class="wb-table wb-table-list">
-    <thead><tr>${head}</tr></thead>
-    <tbody>
-    ${prepend}${tableRows}
-    </tbody>
-  </table>
-  ${hint}
-  </div>
-  ${foot}`;
-}
-
-/** 校验登录后回跳地址：仅允许站内后台页面，避免开放重定向与登录页自循环 */
-function safeNext(raw) {
-  if (!raw || (raw !== '/admin' && !raw.startsWith('/admin/'))) return '';
-  // 先解码再判断：%2e%2e、%5c 等编码变形同样能构造目录穿越，只看原始字面量会漏拦。
-  // 最多还原 3 层（防多重编码绕过），解码失败说明地址本身非法，一律拒绝。
-  let decoded = raw;
-  for (let i = 0; i < 3; i += 1) {
-    let next;
-    try {
-      next = decodeURIComponent(decoded);
-    } catch {
-      return '';
-    }
-    if (next === decoded) break;
-    decoded = next;
-  }
-  // 只校验路径部分：地址已限定以 /admin 开头，不存在协议相对跳转，
-  // 查询串里出现 // 或 ..（如 ?q=http://x）属正常内容，不应误伤
-  const path = decoded.split(/[?#]/)[0];
-  if (path.includes('\\') || path.includes('..')) return '';
-  // 解码后仍须落在后台路径下，否则（如 /admin/..%2fescape）不再放行
-  if (path !== '/admin' && !path.startsWith('/admin/')) return '';
-  if (path === '/admin/login' || path.startsWith('/admin/logout')) return '';
-  return raw;
-}
-
-/* ---------------- 编辑表单 / 单条删除（各模块共用） ---------------- */
-
-/**
- * 编辑表单统一骨架：按 ?id= 取行 → 查不到给 404 → 包上表单外壳 → 渲染后台页。
- * fetchRow(id) 返回目标行或 null；fields(row) 返回表单内部字段（可为 async）。
- */
-async function editForm({ env, user, url, back, key, label, fetchRow, fields }) {
-  const id = intParam(url, 'id');
-  // 带了 ?id= 却不是正整数（0 / 负数 / 非法字符串）时按「记录不存在」处理：
-  // 否则表单会带着 id=0 提交，落库时被当成新建，编辑请求凭空多出一条记录
-  if (url.searchParams.has('id') && !id) return missingPage(env, user, back, `编辑${label}`, label);
-  const row = id ? await fetchRow(id) : null;
-  if (id && !row) return missingPage(env, user, back, `编辑${label}`, label);
-  const body = `
-  <form class="wb-card wb-form wb-form-wide" method="post" action="${back}/save">
-    <input type="hidden" name="${key}" value="${row ? row[key] : 0}">
-    ${await fields(row)}
-    <div class="inline" style="margin-top:16px"><button class="wb-btn p" type="submit">保存</button><a class="wb-btn" href="${back}">返回列表</a></div>
-  </form>`;
-  // 带上 url 才能显示保存失败后回跳时的 ?err= 提示
-  return adminPage(env, user, back, row ? `编辑${label}` : `新建${label}`, body, url);
-}
-
-/**
- * 单条删除表单的通用处理：取 key → 执行 done → 回跳列表。
- * done 返回 false 表示被保护规则跳过；返回 D1 结果且一行未命中（记录已被并发删除、
- * 或构造请求伪造了 id）时提示「不存在」，而不是静默提示「已删除」。
- */
-async function deleteOne(request, back, key, done, message = '已删除') {
-  const form = await readForm(request);
-  const id = intField(form, key);
-  if (!id) return backErr(back, '参数不正确');
-  const res = await done(id);
-  if (res === false || !changed(res)) return backErr(back, '记录不存在，可能已被删除');
-  return backMsg(back, message);
-}
-
-/**
- * 新增 / 更新的通用落库：id 非 0 走 UPDATE（自动把 id 追加为最后一个参数），否则走 INSERT。
- * - 更新命中 0 行说明目标已被删除，返回提示而不是静默「保存成功」；
- * - uniqueErr 非空时，唯一约束冲突按该文案提示，而不是抛成 500。
- * 成功返回 null，失败返回可直接 return 的提示响应。
- */
-async function saveRow(env, back, { id, update, insert, uniqueErr = '', missingErr = '记录不存在，可能已被删除' }) {
-  try {
-    if (id) {
-      const res = await run(env, update[0], [...update[1], id]);
-      if (!changed(res)) return backErr(back, missingErr);
-    } else {
-      await run(env, insert[0], insert[1]);
-    }
-  } catch (err) {
-    if (uniqueErr && /UNIQUE/i.test(String(err && err.message))) return backErr(back, uniqueErr);
-    throw err;
-  }
-  return null;
-}
+import {
+  MENUS,
+  MENU_KEYS,
+  menuOfPath,
+  visibleMenuKeys,
+  pageFrame,
+  adminPage,
+  emptyRow,
+  missingPage,
+  deleteForm,
+  statusToggle,
+  bulkButton,
+  bulkCheckAll,
+  bulkCheck,
+  bulkDelete,
+  listShell,
+  safeNext,
+  editForm,
+  deleteOne,
+  saveRow,
+} from './admin/layout.js';
+import {
+  SETTING_GROUPS,
+  FEATURE_GROUPS,
+  optionsPage,
+  saveSettings,
+  optionsReset,
+  featuresPage,
+  featuresBackup,
+} from './admin/settings.js';
+import { pubBody, PUB_SCRIPT } from './theme.js';
 
 async function loginPage(env, session, error = '', next = '') {
   const options = await getOptions(env);
@@ -1844,241 +1524,6 @@ async function profileSave(env, request, currentUser) {
   });
   if (error) return fail(error);
   return backMsg('/admin/profile', '资料已保存');
-}
-
-/* ---------------- 站点设置 ---------------- */
-
-const SETTING_GROUPS = [
-  {
-    title: '基础信息',
-    fields: [
-      ['title', '站点名称', 'text'],
-      ['description', '站点简介', 'text'],
-      ['keywords', '关键词（英文逗号分隔）', 'text'],
-      ['siteUrl', '站点地址（左侧资料卡展示）', 'text'],
-      ['pageSize', '每页文章数', 'text'],
-    ],
-  },
-  {
-    title: '首页大图',
-    fields: [
-      [
-        'ROWINGBOHE',
-        '大图样式：0 首图+随机 / 1 仅随机图 / 2 首图+指定图 / 3 指定图 / 4 关闭',
-        'text',
-        '与主题一致：数字越大越省流量，选 0/2 会读取正文首图',
-      ],
-      ['randomNum', '随机图数量（/images/random 下 1..N.jpg）', 'text'],
-      ['ROWINGBOHEUrl', '指定大图链接', 'text'],
-    ],
-  },
-  /**
-   * 头部资料卡：前台资料卡展示的信息，属站点级配置（存于 options 表），未登录访客同样可见。
-   * 字段顺序按前台引用顺序排列：head 图标 → 页面背景 → 资料卡封面、头像、昵称、简介、
-   * 居住地、生日 → 资料卡按钮与菜单。
-   */
-  {
-    title: '头部资料卡',
-    tip: '前台资料卡展示的信息，未登录访客同样可见；未填写时前台按默认值展示。',
-    fields: [
-      ['faviconUrl', 'favicon 图标链接', 'text'],
-      ['bgUrl', '背景图片链接', 'text'],
-      ['cardBgUrl', '顶部卡片背景图片链接', 'text'],
-      ['headImgUrl', '头像地址', 'text'],
-      ['yourNickname', '昵称', 'text'],
-      ['yourDescription', '简介', 'text'],
-      ['yourPlace', '居住地', 'text'],
-      ['yourBirthday', '生日', 'text'],
-      ['profileText1', '第一个按钮文字（悬停显示二维码）', 'text'],
-      ['profileLink1', '第一个按钮悬停图片链接', 'text'],
-      ['profileText2', '第二个按钮文字', 'text'],
-      ['profileLink2', '第二个按钮链接', 'text'],
-      ['yourMenuContent', '资料卡菜单（HTML，直接显示为链接）', 'textarea'],
-    ],
-  },
-  {
-    title: '评论框',
-    fields: [
-      ['commentCustom1', '评论框提示内容', 'text'],
-      ['commentCustom2', '发送按钮文字', 'text'],
-    ],
-  },
-  {
-    title: '自定义代码与页脚',
-    fields: [
-      ['optionHeader', '自定义 Header（插入 head 内）', 'textarea'],
-      ['optionFooter', '自定义 Footer（插入页脚前）', 'textarea'],
-      ['myFooter', '网站页脚内容（如备案号）', 'textarea'],
-    ],
-  },
-];
-
-/* ---------------- 设置项渲染与收集（站点设置、功能管理共用） ---------------- */
-
-/**
- * 设置字段：[name, label, type, extra]
- * - type 'text' / 'textarea'：extra 为字段下方的提示文案
- * - type 'switch'：extra 为「开启」时写入的值，关闭时自动写入相反值；
- *   视图层统一为「勾选 = 开启」，与底层 0/1 的取值极性解耦（部分开关 0 表示开启）
- */
-function renderSettingField([name, label, type = 'text', extra = ''], options) {
-  if (type === 'switch') {
-    const onValue = extra || '0';
-    const on = String(options[name] ?? onValue) === onValue;
-    return `<label class="wb-switch">
-        <input type="checkbox" name="${name}" value="${onValue}"${on ? ' checked' : ''}>
-        <span class="wb-switch-track" aria-hidden="true"></span>
-        <span class="wb-switch-text">${label}</span>
-      </label>`;
-  }
-  const value = e(options[name] ?? '');
-  const control =
-    type === 'textarea'
-      ? `<textarea name="${name}" style="min-height:120px">${value}</textarea>`
-      : `<input type="text" name="${name}" value="${value}">`;
-  return `<div class="field"><label>${label}</label>${control}${extra ? `<div class="hint">${extra}</div>` : ''}</div>`;
-}
-
-/** 渲染设置分组卡片；layout 为 switch 时字段以开关网格排列 */
-function renderSettingCard(group, options) {
-  const fields = group.fields.map((f) => renderSettingField(f, options)).join('');
-  return `
-    <div class="wb-card wb-card-pad">
-      <h3>${group.title}</h3>
-      ${group.tip ? `<div class="tip">${group.tip}</div>` : ''}
-      ${group.layout === 'switch' ? `<div class="wb-switch-grid">${fields}</div>` : fields}
-    </div>`;
-}
-
-/** 渲染设置表单：分组卡片 + 提交按钮（extra 用于追加按钮，如「恢复默认」） */
-function renderSettingForm({ action, groups, options, submitText, extra = '' }) {
-  return `
-  <form class="wb-form wb-form-wide wb-form-flat" method="post" action="${action}">
-    ${groups.map((g) => renderSettingCard(g, options)).join('')}
-    <div class="inline" style="margin-bottom:20px;">
-      <button class="wb-btn p" type="submit">${submitText}</button>${extra}
-    </div>
-  </form>`;
-}
-
-/** 从表单收集分组内的设置项；开关未勾选时浏览器不提交该字段，需按「关闭」写入相反值 */
-function collectSettings(groups, form) {
-  const data = {};
-  for (const group of groups) {
-    for (const [name, , type = 'text', extra = ''] of group.fields) {
-      if (type === 'switch') {
-        const onValue = extra || '0';
-        data[name] = form.get(name) === null ? (onValue === '0' ? '1' : '0') : onValue;
-      } else if (form.get(name) !== null) {
-        data[name] = field(form, name);
-      }
-    }
-  }
-  return data;
-}
-
-/** 读取设置备份行（未备份时返回 null） */
-function getOptionsBackup(env) {
-  return first(env, "SELECT value FROM options WHERE name = 'options_backup'");
-}
-
-async function optionsPage(env, user, url) {
-  const options = await getOptions(env);
-  const body = renderSettingForm({
-    action: '/admin/options',
-    groups: SETTING_GROUPS,
-    options,
-    submitText: '保存全部设置',
-    extra:
-      '<button class="wb-btn" type="submit" formaction="/admin/options/reset" formmethod="post" onclick="return confirm(\'恢复为默认设置？当前设置将被覆盖\');">恢复默认</button>',
-  });
-  return adminPage(env, user, '/admin/options', '站点设置', body, url);
-}
-
-/** 站点设置 / 功能开关共用的保存流程：按分组收集表单字段后落库 */
-async function saveSettings(env, request, groups, back) {
-  await saveOptions(env, collectSettings(groups, await readForm(request)));
-  return backMsg(back, '设置已保存');
-}
-
-async function optionsReset(env) {
-  // 「恢复默认设置」只重置配置项，保留 options_backup：备份行本身也存在 options 表里，
-  // 若一并删掉，管理员就无法再通过「恢复备份」找回重置前的设置。
-  await run(env, "DELETE FROM options WHERE name <> 'options_backup'");
-  await saveOptions(env, DEFAULT_OPTIONS);
-  return backMsg('/admin/options', '已恢复默认设置');
-}
-
-/* ---------------- 功能管理 ---------------- */
-
-const FEATURE_GROUPS = [
-  {
-    title: '功能开关',
-    layout: 'switch',
-    fields: [
-      ['searchOpen', '显示搜索框', 'switch', '0'],
-      ['loginButtonOpen', '显示登录按钮', 'switch', '0'],
-      ['registerOpen', '显示注册按钮', 'switch', '0'],
-      ['registerReview', '注册需审核', 'switch', '1'],
-      ['likeOpen', '显示点赞按钮', 'switch', '0'],
-      ['repostOpen', '显示转发按钮', 'switch', '0'],
-      ['followOpen', '显示关注按钮', 'switch', '0'],
-      ['topicOpen', '显示热门话题榜', 'switch', '0'],
-      ['friendLinkOpen', '显示右栏友链', 'switch', '0'],
-      ['frontPublish', '开放前台投稿', 'switch', '0'],
-      ['frontPublishReview', '前台投稿需审核', 'switch', '1'],
-      ['commentReview', '评论需审核', 'switch', '1'],
-      ['frontPublishTimer', '发布框显示定时发布', 'switch', '0'],
-      ['frontPublishScope', '发布框显示可见范围', 'switch', '0'],
-      ['frontPublishStatement', '发布框显示内容声明', 'switch', '0'],
-    ],
-  },
-];
-
-async function featuresPage(env, user, url) {
-  const options = await getOptions(env);
-  const backup = await getOptionsBackup(env);
-  const body = `${renderSettingForm({ action: '/admin/features', groups: FEATURE_GROUPS, options, submitText: '保存设置' })}
-  <div class="wb-card wb-card-pad">
-    <h3>设置备份</h3>
-    <p class="muted">${backup ? '已有备份数据' : '当前没有备份数据'}</p>
-    <div class="inline">
-      <form method="post" action="/admin/features/backup" style="display:inline"><button class="wb-btn" type="submit">备份设置数据</button></form>
-      <form method="post" action="/admin/features/restore" style="display:inline"><button class="wb-btn" type="submit">还原设置数据</button></form>
-      <form method="post" action="/admin/features/unbackup" style="display:inline"><button class="wb-btn d" type="submit">删除备份数据</button></form>
-    </div>
-  </div>`;
-  return adminPage(env, user, '/admin/features', '功能管理', body, url);
-}
-
-async function featuresBackup(env, mode) {
-  if (mode === 'backup') {
-    const options = await getOptions(env);
-    await saveOptions(env, { options_backup: JSON.stringify(options) });
-    return backMsg('/admin/features', '备份完成');
-  }
-  if (mode === 'restore') {
-    const row = await getOptionsBackup(env);
-    if (!row || !row.value) return backErr('/admin/features', '没有备份数据，无法还原');
-    let data;
-    try {
-      data = JSON.parse(row.value);
-    } catch {
-      return backErr('/admin/features', '备份数据已损坏，无法还原');
-    }
-    if (!data || typeof data !== 'object') return backErr('/admin/features', '备份数据已损坏，无法还原');
-    // 备份由 getOptions 生成，键必然落在 DEFAULT_OPTIONS 内；按白名单过滤，
-    // 避免被篡改或旧版本的备份把任意键名写进 options（备份行自身不是设置项，同样排除）
-    const restored = {};
-    for (const name of Object.keys(DEFAULT_OPTIONS)) {
-      if (name in data) restored[name] = data[name];
-    }
-    await saveOptions(env, restored);
-    return backMsg('/admin/features', '已还原备份设置');
-  }
-  const res = await run(env, "DELETE FROM options WHERE name = 'options_backup'");
-  if (!changed(res)) return backErr('/admin/features', '没有备份数据可删除');
-  return backMsg('/admin/features', '已删除备份数据');
 }
 
 /* ---------------- 路由 ---------------- */

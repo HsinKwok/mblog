@@ -461,3 +461,16 @@ a.wb-act { text-align: center; }
   .wb-search { flex: 1 1 auto; width: auto; max-width: none; }
   .cols { grid-template-columns: 1fr; }
 }
+
+/* ---------------- AJAX 渐进增强 ---------------- */
+.wb-feed-block.is-loading { opacity: .55; pointer-events: none; transition: opacity .15s; }
+.wb-ajax-toast {
+  position: fixed; left: 50%; bottom: 32px; z-index: 9999;
+  transform: translateX(-50%);
+  max-width: 90vw; padding: 10px 18px; border-radius: 6px;
+  background: rgba(38, 42, 48, .92); color: #fff; font-size: 14px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .18);
+  opacity: 1; transition: opacity .3s, transform .3s;
+}
+.wb-ajax-toast.err { background: rgba(201, 48, 44, .95); }
+.wb-ajax-toast.out { opacity: 0; transform: translate(-50%, 8px); }
