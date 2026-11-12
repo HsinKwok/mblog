@@ -4,12 +4,14 @@
 import {
   getSession,
   backErr,
+  backMsg,
   withNotice,
   first,
   redirect,
   readForm,
   field,
   saveProfile,
+  refreshSession,
   html,
   errorOf,
   noticeOf,
@@ -49,7 +51,8 @@ export async function settingsRouter(request, env, url) {
       confirm,
     });
     if (error) return back('err', error);
-    return back('msg', '个人资料已保存');
+    // 改密会让会话里的口令指纹失效：用最新用户行重签当前会话，避免保存后被自己登出
+    return backMsg('/settings', '个人资料已保存', await refreshSession(env, session.userid));
   }
 
   const { options, categories, links, nav, hotComments, topics, profile } = await pageCtx(request, env, session);

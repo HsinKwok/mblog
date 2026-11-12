@@ -24,14 +24,14 @@ export const json = (data, status = 200, headers = {}) =>
   });
 
 /** 拼接提示查询串（path 自带查询串时用 & 连接），消息统一 URL 编码 */
-export const withNotice = (path, key, message) =>
-  redirect(`${path}${path.includes('?') ? '&' : '?'}${key}=${encodeURIComponent(message)}`);
+export const withNotice = (path, key, message, headers = {}) =>
+  redirect(`${path}${path.includes('?') ? '&' : '?'}${key}=${encodeURIComponent(message)}`, headers);
 
 /** 302 回跳并提示成功 */
-export const backMsg = (path, message) => withNotice(path, 'msg', message);
+export const backMsg = (path, message, headers = {}) => withNotice(path, 'msg', message, headers);
 
 /** 302 回跳并提示错误 */
-export const backErr = (path, message) => withNotice(path, 'err', message);
+export const backErr = (path, message, headers = {}) => withNotice(path, 'err', message, headers);
 
 /** 读取回跳的成功提示（与 backMsg 写入端配对） */
 export const noticeOf = (url) => url.searchParams.get('msg') || '';

@@ -96,13 +96,20 @@ export async function verifyPassword(password, stored) {
   return { ok: timingSafeEqual(md5(password), value.toLowerCase()), legacy: true };
 }
 
-/** 把历史 MD5 口令就地升级为 PBKDF2（仅在口令已校验通过后调用） */
+/**
+ * 把历史 MD5 口令就地升级为 PBKDF2（仅在口令已校验通过后调用）。
+ * 返回新的哈希：调用方签发会话时必须用它，否则会话里的口令指纹仍是旧 MD5 的，
+ * 下一跳 getSession 会因指纹不符把刚登录的 Cookie 判为失效。写库失败时返回空串，调用方沿用旧值。
+ */
 export async function upgradePassword(env, userid, password) {
+  const hash = await hashPassword(password);
   try {
-    await run(env, 'UPDATE user SET md5password = ? WHERE userid = ?', [await hashPassword(password), userid]);
+    await run(env, 'UPDATE user SET md5password = ? WHERE userid = ?', [hash, userid]);
+    return hash;
   } catch (err) {
     // 升级失败不影响本次登录
     console.error('口令哈希升级失败：', err && err.message);
+    return '';
   }
 }
 
@@ -316,7 +323,12 @@ export async function attemptLogin(env, request, { username, password, requireAd
   }
   if (user.status === 'pending') return { ok: false, throttled: false, pending: true, user: null };
   await clearLoginFailures(env, throttleKey);
-  if (check.legacy) await upgradePassword(env, user.userid, password);
+  if (check.legacy) {
+    // 库里已换成 PBKDF2，返回给调用方的 user 也要同步换掉，
+    // 否则 createSession 会用旧 MD5 算口令指纹，签出的 Cookie 下次请求即失效
+    const upgraded = await upgradePassword(env, user.userid, password);
+    if (upgraded) user.md5password = upgraded;
+  }
   return { ok: true, throttled: false, user };
 }
 
@@ -355,6 +367,17 @@ export async function createSession(env, user, extra = {}) {
 
 export function clearSession() {
   return `${COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Secure; Max-Age=0`;
+}
+
+/**
+ * 口令变更后刷新「当前浏览器」的会话，返回可直接拼进响应头的 headers。
+ * 口令指纹里掺着哈希，改密会让当前设备手里的旧 Cookie 也一并失效：
+ * 其他设备被登出是预期行为，但操作改密的这台设备不该把自己踢下线，
+ * 故按库里最新的用户行重签一次。
+ */
+export async function refreshSession(env, userid, extra = {}) {
+  const user = await first(env, 'SELECT * FROM user WHERE userid = ?', [userid]);
+  return user ? { 'set-cookie': await createSession(env, user, extra) } : {};
 }
 
 export async function getSession(env, request) {

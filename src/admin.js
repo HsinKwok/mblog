@@ -35,6 +35,7 @@ import {
   run,
   getOptions,
   createSession,
+  refreshSession,
   clearSession,
   getSession,
   isAdmin,
@@ -155,7 +156,8 @@ async function initSave(env, request, currentUser) {
     confirm: field(form, 'password2'),
   });
   if (error) return backErr(INIT_PATH, error);
-  return backMsg('/admin', '账号已初始化，请牢记新的用户名与密码');
+  // 初始化会同时改用户名与口令，旧 Cookie 的指纹已失效：重签后台会话，直接进入后台
+  return backMsg('/admin', '账号已初始化，请牢记新的用户名与密码', await refreshSession(env, currentUser.userid, { admin: true }));
 }
 
 /* ---------------- 仪表盘 ---------------- */
@@ -1523,7 +1525,8 @@ async function profileSave(env, request, currentUser) {
     confirm: field(form, 'password2'),
   });
   if (error) return fail(error);
-  return backMsg('/admin/profile', '资料已保存');
+  // 后台改密同样会让口令指纹失效：重签后台会话（保留 admin 标记），当前浏览器继续可用
+  return backMsg('/admin/profile', '资料已保存', await refreshSession(env, currentUser.userid, { admin: true }));
 }
 
 /* ---------------- 路由 ---------------- */
