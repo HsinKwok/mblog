@@ -35,6 +35,11 @@ import { COMMENT_NOTICES } from './comment.js';
 
 /* ---------------- 公共数据 ---------------- */
 
+// 侧栏热门话题的实例内缓存（60 秒）：三表 JOIN + GROUP BY，是公共查询里最重的一条
+const TOPICS_TTL_MS = 60000;
+let cachedTopics = null;
+let cachedTopicsAt = 0;
+
 /**
  * 公共查询批量执行：列表 / 顶栏 / 侧栏 / 资料卡计数合并为一次 D1 batch 往返。
  * batch 失败时退回逐条查询并容忍缺表，旧库尚未升级时仍能渲染。
@@ -93,8 +98,14 @@ export async function commonData(env, session = null, preloadedGroups = null) {
          AND p.is_page = 0 AND p.created <= ${NOW_SQL}
        ORDER BY cm.coid DESC LIMIT 6`,
     },
-    // 热门话题（复用标签，统计已发布文章数量）
-    {
+    // 微博等级（后台「等级管理」维护）：用户徽章据此解析
+    { key: 'levels', sql: 'SELECT * FROM user_level ORDER BY ordernum, min_posts, lid' },
+  ];
+  // 热门话题要对 tag / post_tag / post 三表做 JOIN + GROUP BY，是公共查询里最重的一条：
+  // 侧栏数据不要求实时，单实例内缓存 60 秒，避免每次请求都重算
+  const topicsFresh = cachedTopics && Date.now() - cachedTopicsAt < TOPICS_TTL_MS;
+  if (!topicsFresh) {
+    specs.push({
       key: 'topics',
       sql: `SELECT t.name, t.slug, COUNT(DISTINCT pt.pid) c
        FROM tag t
@@ -103,10 +114,8 @@ export async function commonData(env, session = null, preloadedGroups = null) {
          AND p.created <= ${NOW_SQL}
        GROUP BY t.tid, t.name, t.slug
        ORDER BY c DESC, t.tid LIMIT 10`,
-    },
-    // 微博等级（后台「等级管理」维护）：用户徽章据此解析
-    { key: 'levels', sql: 'SELECT * FROM user_level ORDER BY ordernum, min_posts, lid' },
-  ];
+    });
+  }
   // 用户组（后台「用户组管理」维护）：决定等级徽章使用哪一套图标；调用方已查过时直接复用
   if (!preloadedGroups) {
     specs.push({ key: 'groups', sql: 'SELECT * FROM user_group ORDER BY ordernum, gid' });
@@ -125,6 +134,12 @@ export async function commonData(env, session = null, preloadedGroups = null) {
   }
   const [options, rows] = await Promise.all([getOptions(env), batchCommon(env, specs)]);
   const data = Object.fromEntries(specs.map((spec, i) => [spec.key, rows[i] || []]));
+  // 命中缓存时沿用上次结果，未命中则把本次查询结果写入缓存
+  if (topicsFresh) data.topics = cachedTopics;
+  else {
+    cachedTopics = data.topics;
+    cachedTopicsAt = Date.now();
+  }
   const levels = data.levels;
   const groups = preloadedGroups || data.groups || [];
   const profile = session
@@ -159,6 +174,85 @@ export async function commonData(env, session = null, preloadedGroups = null) {
 export async function pageCtx(request, env, session, preloadedGroups = null) {
   const current = session === undefined ? await getSession(env, request) : session;
   return { session: current, ...(await commonData(env, current, preloadedGroups)) };
+}
+
+/**
+ * 提示页 / 登录页 / 404 只需要站点设置与顶部导航，
+ * 不必为它们跑分类、友链、热门评论、热门话题、等级、用户组与资料卡计数整套查询。
+ */
+export async function minimalData(env) {
+  const [options, navRows] = await Promise.all([
+    getOptions(env),
+    all(env, 'SELECT * FROM nav ORDER BY ordernum, nid').catch(() => []),
+  ]);
+  return { options, nav: navRows };
+}
+
+/* ---------------- 匿名访问的边缘缓存 ---------------- */
+
+const EDGE_TTL = 60; // 内容新鲜期
+const EDGE_STALE = 300; // 过期后仍可继续返回的时长（手工实现 stale-while-revalidate）
+
+/** 对外响应：去掉内部时间戳，并按新鲜期给浏览器一个较短的缓存时间 */
+function edgeServe(entry, ttl) {
+  const headers = new Headers(entry.headers);
+  headers.delete('x-render-at');
+  headers.set('cache-control', `public, max-age=${ttl}`);
+  return new Response(entry.body, { status: entry.status, headers });
+}
+
+/** 写入边缘缓存：剥掉 Set-Cookie（Cache API 会拒绝存储带 Set-Cookie 的响应） */
+function edgeStore(cache, key, res, ttl, stale) {
+  const headers = new Headers(res.headers);
+  headers.delete('set-cookie');
+  // 明确按 Cookie 区分，避免任何中间缓存把它发给已登录访客
+  headers.set('vary', 'Cookie');
+  // 存储期要覆盖「新鲜期 + 陈旧期」，否则后台刷新还没写完条目就过期了
+  headers.set('cache-control', `public, max-age=${ttl + stale}`);
+  headers.set('x-render-at', String(Date.now()));
+  const out = new Response(res.body, { status: 200, headers });
+  return { out, write: cache.put(key, out.clone()).catch(() => {}) };
+}
+
+/**
+ * 列表页 / 详情页 / 静态信息页的边缘缓存：只对「没有会话 Cookie」的 GET 请求生效。
+ * 这类页面的内容与访客身份无关（左栏是站点资料卡，卡片上没有点赞 / 关注状态），
+ * 可以整页缓存；带会话的请求直接透传，保证登录态与后台改动即时可见。
+ *
+ * 过期后不阻塞访客：先返回旧内容，再在 waitUntil 里重新渲染并写回。
+ * Cache API 本身不支持 stale-while-revalidate，这里按 x-render-at 时间戳手工实现。
+ */
+export async function edgeCached(request, ctx, render, options = {}) {
+  const ttl = options.ttl ?? EDGE_TTL;
+  const stale = options.stale ?? EDGE_STALE;
+  if (request.method !== 'GET' || readCookie(request, 'mblog_session')) return render();
+  if (typeof caches === 'undefined' || !caches.default) return render();
+  const key = new Request(new URL(request.url).toString(), { method: 'GET' });
+  const cache = caches.default;
+  const hit = await cache.match(key);
+  if (hit) {
+    const age = (Date.now() - (Number(hit.headers.get('x-render-at')) || 0)) / 1000;
+    if (age < ttl) return edgeServe(hit, ttl);
+    if (age < ttl + stale) {
+      const refresh = (async () => {
+        try {
+          const res = await render();
+          if (res.status !== 200) return;
+          await edgeStore(cache, key, res, ttl, stale).write;
+        } catch {
+          // 后台刷新失败就继续用旧内容，等下一次请求再试
+        }
+      })();
+      if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(refresh);
+      return edgeServe(hit, ttl);
+    }
+  }
+  const res = await render();
+  if (res.status !== 200) return res;
+  const { out, write } = edgeStore(cache, key, res, ttl, stale);
+  if (ctx && typeof ctx.waitUntil === 'function') ctx.waitUntil(write);
+  else await write;
+  return edgeServe(out, ttl);
 }
 
 /**
@@ -430,18 +524,17 @@ export async function visiblePost(env, request, { isPage, key }) {
   return { post, session, published, preview, groups };
 }
 
-/** 前台提示页：自动加载公共数据与会话 */
+/** 前台提示页：只需要站点设置与顶部导航，不跑整套公共查询 */
 export async function renderMessage(request, env, { pageTitle, message, status = 200 }) {
-  const { session, options, nav } = await pageCtx(request, env);
-  return html(
-    messagePage({ options, session, pageTitle, message, nav }),
-    status
-  );
+  const session = await getSession(env, request);
+  const { options, nav } = await minimalData(env);
+  return html(messagePage({ options, session, pageTitle, message, nav }), status);
 }
 
 /** 登录 / 注册页：两者只差模式与标题，注册页在开关关闭时直接给提示 */
 export async function authPageFor(request, env, url, mode) {
-  const { session, options, nav } = await pageCtx(request, env);
+  const session = await getSession(env, request);
+  const { options, nav } = await minimalData(env);
   const isRegister = mode === 'register';
   if (isRegister && !optionOn(options, 'registerOpen')) {
     return renderMessage(request, env, { pageTitle: '注册已关闭', message: '本站暂未开放注册。' });

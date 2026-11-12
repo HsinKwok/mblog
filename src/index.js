@@ -27,7 +27,7 @@ export default {
 
       // AJAX 接口：详情页互动与列表无刷新翻页
       if (path === '/api' || path.startsWith('/api/')) {
-        return await apiRouter(request, env, url);
+        return await apiRouter(request, env, url, ctx);
       }
 
       // 后台也放进 try：否则后台异常不会写日志，线上只能看到 Cloudflare 的通用错误页

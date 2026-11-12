@@ -7,10 +7,12 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "covers": "node scripts/build-covers.mjs",
     "db:init:local": "wrangler d1 execute mblog --local --file=./schema.sql",
     "db:init:remote": "wrangler d1 execute mblog --remote --file=./schema.sql"
   },
   "devDependencies": {
+    "sharp": "^0.35.5",
     "wrangler": "^4.129.1"
   }
 }

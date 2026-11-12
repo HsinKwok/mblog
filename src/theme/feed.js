@@ -130,7 +130,7 @@ export function postCard(post, options, session) {
   // 「首页大图」对每条卡片都出图（与原主题 index.php 一致）：微博式短文若正文自带配图，
   // 正文里已经展示过，不再叠加封面；纯文字短文与普通文章一样按设置出随机图 / 指定图
   const cover = isShort && firstImage(post.content) ? '' : coverFor(post, options);
-  const coverHtml = cover ? `<a href="${permalink}"><img class="cover" src="${e(cover)}" alt="${e(post.title)}" loading="lazy" decoding="async"></a>` : '';
+  const coverHtml = cover ? `<a href="${permalink}"><img class="cover" src="${e(cover)}" alt="${e(post.title)}" width="640" height="360" loading="lazy" decoding="async"></a>` : '';
   const topics = topicLinks(post.tags);
   const editLink =
     session && session.role === 'administrator'
@@ -242,7 +242,7 @@ export function postCards(posts, options, session) {
 
 function coverFor(post, options) {
   const mode = options.ROWINGBOHE ?? '1';
-  const random = randomCover(options);
+  const random = randomCover(post, options);
   if (mode === '4') return '';
   if (mode === '1') return random;
   // 正文首图与后台填写的指定图都可被正文内容影响，统一过地址白名单后再输出：
@@ -255,7 +255,13 @@ function coverFor(post, options) {
   return random;
 }
 
-function randomCover(options) {
+/**
+ * 随机封面改为「按 pid 取模」的稳定选择：同一篇文章每次渲染都用同一张图，
+ * 浏览器缓存与边缘缓存才能命中；原来的 Math.random() 会导致每次刷新都换图、
+ * 缓存全部失效，冷启动要重新下载整批原图。地址指向 640×360 的 WebP 缩略图。
+ */
+function randomCover(post, options) {
   const total = Math.max(1, parseInt(options.randomNum, 10) || 5);
-  return `/images/random/${Math.floor(Math.random() * total) + 1}.jpg`;
+  const index = ((Number(post.pid) || 0) % total) + 1;
+  return `/images/random/s/${index}.webp`;
 }

@@ -13,6 +13,7 @@ import {
   readForm,
   now,
   first,
+  all,
   run,
   getOptions,
   createSession,
@@ -56,6 +57,7 @@ import {
   visiblePost,
   renderSingle,
   countView,
+  edgeCached,
   authPageFor,
   toggleGate,
   backTo,
@@ -72,31 +74,44 @@ export async function frontRouter(request, env, url, ctx = null) {
   const path = url.pathname;
   const method = request.method;
 
+  // 站点地图 / 爬虫规则：动态生成后交给边缘缓存，爬虫不再直接打到 D1
+  if (path === '/sitemap.xml') {
+    return edgeCached(request, ctx, () => sitemapXml(env, url), { ttl: 3600, stale: 3600 });
+  }
+  if (path === '/robots.txt') {
+    return edgeCached(request, ctx, () => robotsTxt(url), { ttl: 86400, stale: 86400 });
+  }
+
   // 首页
   if (path === '/' || path === '/index.html') {
-    return renderList(request, env, url, {
-      where: PUBLISHED,
-      baseUrl: '/',
-      pageTitle: '首页',
-    });
+    return edgeCached(request, ctx, () =>
+      renderList(request, env, url, {
+        where: PUBLISHED,
+        baseUrl: '/',
+        pageTitle: '首页',
+      })
+    );
   }
 
   // 分类归档
   const catMatch = /^\/category\/([^/]+?)(?:\.html)?$/.exec(path);
   if (catMatch) {
     const slug = decodeSlug(catMatch[1]);
-    const category = await first(env, 'SELECT * FROM category WHERE slug = ?', [slug]);
-    if (!category) return notFoundPage(request, env, '分类不存在');
-    return renderList(request, env, url, {
-      where: `${PUBLISHED} AND p.category_id = ?`,
-      params: [category.cid],
-      // 别名可能含中文等非 ASCII 字符，翻页地址同样要编码后再拼
-      baseUrl: slugHref('/category', slug),
-      pageTitle: `分类 ${category.name}`,
-      activeSlug: slug,
-      // 分类归档不属于任何导航项，不点亮顶栏，避免误高亮「首页」
-      active: '',
-      breadcrumb: `<a href="/">首页</a> &raquo; 分类：${e(category.name)}`,
+    // 分类查询也放进缓存回调里：命中边缘缓存时连这一次 D1 往返都能省掉
+    return edgeCached(request, ctx, async () => {
+      const category = await first(env, 'SELECT * FROM category WHERE slug = ?', [slug]);
+      if (!category) return notFoundPage(request, env, '分类不存在');
+      return renderList(request, env, url, {
+        where: `${PUBLISHED} AND p.category_id = ?`,
+        params: [category.cid],
+        // 别名可能含中文等非 ASCII 字符，翻页地址同样要编码后再拼
+        baseUrl: slugHref('/category', slug),
+        pageTitle: `分类 ${category.name}`,
+        activeSlug: slug,
+        // 分类归档不属于任何导航项，不点亮顶栏，避免误高亮「首页」
+        active: '',
+        breadcrumb: `<a href="/">首页</a> &raquo; 分类：${e(category.name)}`,
+      });
     });
   }
 
@@ -104,18 +119,20 @@ export async function frontRouter(request, env, url, ctx = null) {
   const tagMatch = /^\/tag\/([^/]+?)(?:\.html)?$/.exec(path);
   if (tagMatch) {
     const slug = decodeSlug(tagMatch[1]);
-    const tag = await first(env, 'SELECT * FROM tag WHERE slug = ?', [slug]);
-    if (!tag) return notFoundPage(request, env, '标签不存在');
-    return renderList(request, env, url, {
-      where: `${PUBLISHED} AND p.pid IN (SELECT pid FROM post_tag WHERE tid = ?)`,
-      params: [tag.tid],
-      // 别名可能含中文等非 ASCII 字符，翻页地址同样要编码后再拼
-      baseUrl: slugHref('/tag', slug),
-      pageTitle: `标签 ${tag.name}`,
-      headingTitle: `标签：${tag.name}`,
-      // 标签归档不属于任何导航项，不点亮顶栏
-      active: '',
-      breadcrumb: `<a href="/">首页</a> &raquo; 标签：${e(tag.name)}`,
+    return edgeCached(request, ctx, async () => {
+      const tag = await first(env, 'SELECT * FROM tag WHERE slug = ?', [slug]);
+      if (!tag) return notFoundPage(request, env, '标签不存在');
+      return renderList(request, env, url, {
+        where: `${PUBLISHED} AND p.pid IN (SELECT pid FROM post_tag WHERE tid = ?)`,
+        params: [tag.tid],
+        // 别名可能含中文等非 ASCII 字符，翻页地址同样要编码后再拼
+        baseUrl: slugHref('/tag', slug),
+        pageTitle: `标签 ${tag.name}`,
+        headingTitle: `标签：${tag.name}`,
+        // 标签归档不属于任何导航项，不点亮顶栏
+        active: '',
+        breadcrumb: `<a href="/">首页</a> &raquo; 标签：${e(tag.name)}`,
+      });
     });
   }
 
@@ -139,56 +156,60 @@ export async function frontRouter(request, env, url, ctx = null) {
 
   // 友链页面
   if (path === '/links.html' || path === '/links') {
-    const { session, options, categories, links, nav, hotComments, topics, profile } = await pageCtx(request, env);
-    const listHtml = links.length
-      ? linkItems(links, '\n      ')
-      : '<div class="wb-empty">还没有添加友情链接。</div>';
-    const post = {
-      pid: 0,
-      title: '友情链接',
-      created: now(),
-      views: 0,
-      allow_comment: 0,
-      category_name: '',
-      // 正文由服务端按友链数据生成，标记为管理员内容以走可信 HTML 分支（否则会被转义展示）
-      author_role: 'administrator',
-      content: `<p>本站的左邻右舍（由后台「友链管理」维护）：</p>${listHtml}`,
-    };
-    return html(
-      singlePage({
-        options,
-        session,
-        pageTitle: '友情链接',
-        post,
-        comments: [],
-        categories,
-        hotComments,
-        links,
-        nav,
-        topics,
-        profile,
-        breadcrumb: '<a href="/">首页</a> &raquo; 友情链接',
-        active: 'links',
-      })
-    );
+    return edgeCached(request, ctx, async () => {
+      const { session, options, categories, links, nav, hotComments, topics, profile } = await pageCtx(request, env);
+      const listHtml = links.length
+        ? linkItems(links, '\n      ')
+        : '<div class="wb-empty">还没有添加友情链接。</div>';
+      const post = {
+        pid: 0,
+        title: '友情链接',
+        created: now(),
+        views: 0,
+        allow_comment: 0,
+        category_name: '',
+        // 正文由服务端按友链数据生成，标记为管理员内容以走可信 HTML 分支（否则会被转义展示）
+        author_role: 'administrator',
+        content: `<p>本站的左邻右舍（由后台「友链管理」维护）：</p>${listHtml}`,
+      };
+      return html(
+        singlePage({
+          options,
+          session,
+          pageTitle: '友情链接',
+          post,
+          comments: [],
+          categories,
+          hotComments,
+          links,
+          nav,
+          topics,
+          profile,
+          breadcrumb: '<a href="/">首页</a> &raquo; 友情链接',
+          active: 'links',
+        })
+      );
+    });
   }
 
   // 站点信息页（无内置入口，如需访问请在后台「导航管理」自行添加指向 /site 的链接）
   if (path === '/site' || path === '/site.html') {
-    const { session, options, categories, links, nav, hotComments, topics, profile } = await pageCtx(request, env);
-    return html(
-      sitePage({
-        options,
-        session,
-        pageTitle: '站点信息',
-        categories,
-        hotComments,
-        links,
-        nav,
-        topics,
-        profile,
-      })
-    );
+    return edgeCached(request, ctx, async () => {
+      const { session, options, categories, links, nav, hotComments, topics, profile } = await pageCtx(request, env);
+      return html(
+        sitePage({
+          options,
+          session,
+          pageTitle: '站点信息',
+          categories,
+          hotComments,
+          links,
+          nav,
+          topics,
+          profile,
+        })
+      );
+    });
   }
 
   // 点赞（登录用户）
@@ -308,30 +329,38 @@ export async function frontRouter(request, env, url, ctx = null) {
   // 独立页面：/page/{slug}
   const pageMatch = /^\/page\/([^/]+?)(?:\.html)?$/.exec(path);
   if (pageMatch) {
-    const found = await visiblePost(env, request, { isPage: true, key: decodeSlug(pageMatch[1]) });
-    if (!found) return notFoundPage(request, env, '页面不存在');
-    return renderSingle(request, env, found.post, `<a href="/">首页</a> &raquo; ${e(found.post.title)}`, {
-      session: found.session,
-      notice: found.preview,
-      groups: found.groups,
+    const slug = decodeSlug(pageMatch[1]);
+    return edgeCached(request, ctx, async () => {
+      const found = await visiblePost(env, request, { isPage: true, key: slug });
+      if (!found) return notFoundPage(request, env, '页面不存在');
+      return renderSingle(request, env, found.post, `<a href="/">首页</a> &raquo; ${e(found.post.title)}`, {
+        session: found.session,
+        notice: found.preview,
+        groups: found.groups,
+      });
     });
   }
 
   // 文章详情
   const postMatch = /^\/archives\/([^/]+?)(?:\.html)?$/.exec(path);
   if (postMatch) {
-    const found = await visiblePost(env, request, { isPage: false, key: decodeSlug(postMatch[1]) });
-    if (!found) return notFoundPage(request, env, '文章不存在或未发布');
-    const post = found.post;
-    const viewCookie = found.published ? await countView(request, env, post, ctx) : '';
-    const breadcrumb = post.category_name
-      ? `<a href="/">首页</a> &raquo; <a href="${e(slugHref('/category', post.category_slug))}">${e(post.category_name)}</a> &raquo; ${e(post.title)}`
-      : `<a href="/">首页</a> &raquo; ${e(post.title)}`;
-    return renderSingle(request, env, post, breadcrumb, {
-      session: found.session,
-      notice: found.preview,
-      headers: viewCookie ? { 'set-cookie': viewCookie } : {},
-      groups: found.groups,
+    const key = decodeSlug(postMatch[1]);
+    // 详情页也走边缘缓存：阅读数只在缓存未命中时累加（Set-Cookie 会被 edgeStore 剥掉，
+    // 否则 Cache API 会拒绝存储整页），因此同一篇文章大约每 60 秒最多计一次浏览
+    return edgeCached(request, ctx, async () => {
+      const found = await visiblePost(env, request, { isPage: false, key });
+      if (!found) return notFoundPage(request, env, '文章不存在或未发布');
+      const post = found.post;
+      const viewCookie = found.published ? await countView(request, env, post, ctx) : '';
+      const breadcrumb = post.category_name
+        ? `<a href="/">首页</a> &raquo; <a href="${e(slugHref('/category', post.category_slug))}">${e(post.category_name)}</a> &raquo; ${e(post.title)}`
+        : `<a href="/">首页</a> &raquo; ${e(post.title)}`;
+      return renderSingle(request, env, post, breadcrumb, {
+        session: found.session,
+        notice: found.preview,
+        headers: viewCookie ? { 'set-cookie': viewCookie } : {},
+        groups: found.groups,
+      });
     });
   }
 
@@ -442,4 +471,47 @@ export async function frontRouter(request, env, url, ctx = null) {
   }
 
   return notFoundPage(request, env, '页面不存在');
+}
+
+/* ---------------- 站点地图 / 爬虫规则 ---------------- */
+
+/** 站点地图：文章 / 独立页 / 分类 / 标签，交给边缘缓存一小时 */
+async function sitemapXml(env, url) {
+  const [posts, pages, cats, tags] = await Promise.all([
+    all(
+      env,
+      `SELECT pid, modified FROM post WHERE status = 'publish' AND is_page = 0 AND created <= ${NOW_SQL} ORDER BY pid DESC LIMIT 5000`
+    ),
+    all(env, "SELECT slug, modified FROM post WHERE status = 'publish' AND is_page = 1 ORDER BY pid ASC LIMIT 2000"),
+    all(env, 'SELECT slug FROM category'),
+    all(env, 'SELECT slug FROM tag'),
+  ]);
+  const abs = (p) => `${url.origin}${p}`;
+  const item = (href, modified) =>
+    `<url><loc>${e(abs(href))}</loc>${modified ? `<lastmod>${e(String(modified).slice(0, 10))}</lastmod>` : ''}</url>`;
+  const entries = [item('/')];
+  for (const p of posts) entries.push(item(`/archives/${p.pid}`, p.modified));
+  for (const p of pages) entries.push(item(slugHref('/page', p.slug), p.modified));
+  for (const c of cats) entries.push(item(slugHref('/category', c.slug)));
+  for (const t of tags) entries.push(item(slugHref('/tag', t.slug)));
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${entries.join('\n')}
+</urlset>`;
+  return new Response(xml, { headers: { 'content-type': 'application/xml; charset=utf-8' } });
+}
+
+/** 爬虫规则：后台与写操作入口不抓，站点地图指向当前域名 */
+function robotsTxt(url) {
+  const body = `User-agent: *
+Disallow: /admin
+Disallow: /write
+Disallow: /settings
+Disallow: /review
+Disallow: /api/
+Allow: /
+
+Sitemap: ${url.origin}/sitemap.xml
+`;
+  return new Response(body, { headers: { 'content-type': 'text/plain; charset=utf-8' } });
 }

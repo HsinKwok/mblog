@@ -190,6 +190,26 @@ CREATE TABLE login_attempt (
   last        INTEGER NOT NULL DEFAULT 0
 );
 
+-- ============ 热路径索引 ============
+-- 列表分页的 WHERE + ORDER BY：status / is_page 过滤后按 is_top、created 倒序
+CREATE INDEX idx_post_published ON post (is_page, status, is_top DESC, created DESC);
+-- 作者主页 / 资料卡的已发布微博计数
+CREATE INDEX idx_post_author ON post (author_id, is_page, status);
+-- 分类归档
+CREATE INDEX idx_post_category ON post (category_id);
+-- 转发源回查（0 表示原创，用部分索引排除掉绝大多数行）
+CREATE INDEX idx_post_repost ON post (repost_pid) WHERE repost_pid <> 0;
+-- 详情页评论列表：按 pid + 审核状态取，coid 保证顺序
+CREATE INDEX idx_comment_post ON comment (pid, status, coid);
+-- 侧栏「最新评论」
+CREATE INDEX idx_comment_recent ON comment (status, coid DESC);
+-- 粉丝计数与关注校验：UNIQUE(userid, target_id) 只覆盖按 userid 前缀查询
+CREATE INDEX idx_follow_target ON follow (target_id);
+-- 标签归档：post_tag 主键是 (pid, tid)，按 tid 反查需要单独索引
+CREATE INDEX idx_post_tag_tid ON post_tag (tid);
+-- 「我赞过的」列表：UNIQUE(pid, userid) 只覆盖按 pid 前缀查询
+CREATE INDEX idx_post_like_user ON post_like (userid);
+
 -- ============ 种子数据 ============
 -- 用户组：等级徽章图标集，普通用户读 LV*.png，特邀用户读 TY*.png
 -- 特邀用户组默认免审核，其前台投稿与评论直接发布；审核权限各组默认关闭，按需在后台勾选

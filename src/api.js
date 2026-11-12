@@ -26,7 +26,7 @@ import {
   NOW_SQL,
 } from './lib.js';
 import { postCards, commentItem } from './theme.js';
-import { fetchPosts, PUBLISHED } from './front/context.js';
+import { fetchPosts, PUBLISHED, edgeCached } from './front/context.js';
 
 /* ---------------- 信息流翻页 ---------------- */
 
@@ -167,10 +167,16 @@ async function commentApi(request, env) {
 
 /* ---------------- 分发 ---------------- */
 
-export async function apiRouter(request, env, url) {
+export async function apiRouter(request, env, url, ctx = null) {
   const path = url.pathname;
   const method = request.method;
-  if (path === '/api/feed' && method === 'GET') return feedApi(request, env, url);
+  if (path === '/api/feed' && method === 'GET') {
+    // 搜索结果随关键词无限增长，不缓存（否则边缘缓存会被当成关键词索引使用）；
+    // 首页 / 分类 / 标签的翻页结果与访客无关，按 edgeCached 的规则缓存 60 秒
+    const kind = url.searchParams.get('kind') || 'home';
+    if (kind === 'search') return feedApi(request, env, url);
+    return edgeCached(request, ctx, () => feedApi(request, env, url));
+  }
   if (path === '/api/like' && method === 'POST') return likeApi(request, env);
   if (path === '/api/follow' && method === 'POST') return followApi(request, env);
   if (path === '/api/comment' && method === 'POST') return commentApi(request, env);
