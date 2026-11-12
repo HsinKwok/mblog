@@ -105,6 +105,8 @@ export function listPage({
     links,
     nav,
     activeSlug,
+    // 只有真的渲染了发布框才需要 publisher.css，其余页面少一个阻塞请求
+    publisher: !!publishBox,
   });
 }
 
@@ -275,7 +277,7 @@ export function writePage({ options, session, pageTitle, mode, post, categories,
     </form>
     ${PUB_SCRIPT}
   </div>`;
-  return shell({ options, session, pageTitle, active: 'write', center, categories, profile, topics, hotComments, links, nav });
+  return shell({ options, session, pageTitle, active: 'write', center, categories, profile, topics, hotComments, links, nav, publisher: true });
 }
 
 export function myPostsPage({ options, session, pageTitle, posts, categories = [], hotComments, links, nav = [], topics = [], profile = {}, notice = '' }) {

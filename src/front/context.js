@@ -84,7 +84,11 @@ function userProfile(session, levels, groups, postCount, followingCount, followe
   };
 }
 
-export async function commonData(env, session = null, preloadedGroups = null) {
+/**
+ * 公共查询清单。单独拆出来是因为列表页要把这几条与 COUNT / 列表合并进同一个 batch，
+ * 把原本「取会话 → 公共数据 → 列表」的三次串行往返压成一次。
+ */
+function commonSpecs(session = null, preloadedGroups = null) {
   const specs = [
     { key: 'categories', sql: 'SELECT * FROM category ORDER BY ordernum, cid' },
     { key: 'links', sql: 'SELECT * FROM link ORDER BY ordernum, lid' },
@@ -132,7 +136,11 @@ export async function commonData(env, session = null, preloadedGroups = null) {
       { key: 'myFollowers', sql: 'SELECT COUNT(*) c FROM follow WHERE target_id = ?', params: [session.userid] }
     );
   }
-  const [options, rows] = await Promise.all([getOptions(env), batchCommon(env, specs)]);
+  return { specs, topicsFresh };
+}
+
+/** 把公共查询结果整理成页面上下文数据（与 commonSpecs 配对，rows 可含其它语句的返回值） */
+function assembleCommon(specs, rows, { options, session, preloadedGroups, topicsFresh }) {
   const data = Object.fromEntries(specs.map((spec, i) => [spec.key, rows[i] || []]));
   // 命中缓存时沿用上次结果，未命中则把本次查询结果写入缓存
   if (topicsFresh) data.topics = cachedTopics;
@@ -163,6 +171,12 @@ export async function commonData(env, session = null, preloadedGroups = null) {
     levels,
     groups,
   };
+}
+
+export async function commonData(env, session = null, preloadedGroups = null) {
+  const { specs, topicsFresh } = commonSpecs(session, preloadedGroups);
+  const [options, rows] = await Promise.all([getOptions(env), batchCommon(env, specs)]);
+  return assembleCommon(specs, rows, { options, session, preloadedGroups, topicsFresh });
 }
 
 /**
@@ -292,16 +306,32 @@ export function attachAuthorBadges(rows, levels = [], groups = []) {
   return rows;
 }
 
-export async function fetchPosts(env, url, { where, params = [], size = 10, session = null, levels = [], groups = [] }) {
-  // 先并行发出 COUNT 与当前页数据，再按 COUNT 结果夹页；
-  // 越界页码才补一次查询，正常翻页（含最常见的第 1 页）只需一轮往返。
+/**
+ * 列表页的 COUNT / 列表 SQL。单独拆出是因为列表页要把这两条与公共数据合并进同一个 batch：
+ * 「取会话 → 公共数据 → 列表」原来的三次串行往返，合并后只需一次。
+ * 标签用 json_group_array 聚合进列表行，省掉后续 decoratePosts 的那一轮往返。
+ */
+function feedQueries(url, { where, params = [], size = 10, session = null }) {
   const per = Math.floor(Number(size)) > 0 ? Math.floor(Number(size)) : 1;
   const requested = pageParam(url);
   const countSql = `SELECT COUNT(*) c FROM post p WHERE ${where}`;
+  // 登录用户的点赞 / 关注状态用相关子查询一并取回：都有对应索引，代价远小于再跑一趟 D1 往返
+  const mine = session
+    ? `,
+            (SELECT 1 FROM post_like pl WHERE pl.pid = p.pid AND pl.userid = ?) AS liked,
+            (SELECT 1 FROM follow f2 WHERE f2.userid = ? AND f2.target_id = p.author_id) AS followed`
+    : '';
+  const mineParams = session ? [session.userid, session.userid] : [];
   const listSql = `SELECT p.*, c.name AS category_name, c.slug AS category_slug,
             u.screenname, u.headpic AS author_headpic, u.mail AS author_mail, u.level_id AS author_level_id,
             u.group_id AS author_group_id, u.honor AS author_honor,
             (SELECT COUNT(*) FROM post ap WHERE ap.author_id = p.author_id AND ap.is_page = 0 AND ap.status = 'publish' AND ap.created <= ${NOW_SQL}) AS author_posts,
+            (SELECT COALESCE(json_group_array(json_object('name', t2.name, 'slug', t2.slug)), '[]')
+               FROM post_tag pt2 JOIN tag t2 ON t2.tid = pt2.tid WHERE pt2.pid = p.pid) AS tag_json,
+            (SELECT json_object('pid', sp.pid, 'title', sp.title, 'content', sp.content, 'screenname', su.screenname)
+               FROM post sp LEFT JOIN user su ON su.userid = sp.author_id
+               WHERE sp.pid = p.repost_pid AND sp.status = 'publish'
+                 AND sp.is_page = 0 AND sp.created <= ${NOW_SQL}) AS repost_json${mine},
             ${POST_COUNT_COLUMNS}
      FROM post p
      LEFT JOIN category c ON c.cid = p.category_id
@@ -309,46 +339,72 @@ export async function fetchPosts(env, url, { where, params = [], size = 10, sess
      WHERE ${where}
      ORDER BY p.is_top DESC, p.created DESC, p.pid DESC
      LIMIT ? OFFSET ?`;
+  return {
+    per,
+    requested,
+    params,
+    mineParams,
+    countSql,
+    listSql,
+    countParams: params,
+    listParams: [...mineParams, ...params, per, (requested - 1) * per],
+  };
+}
+
+/** 收尾：按 COUNT 结果夹页（越界才补一次查询），补作者徽章与卡片附加数据 */
+async function finishFeed(env, q, countRows, firstRows, session, levels, groups) {
+  const total = countRows[0]?.c || 0;
+  const totalPages = totalPagesOf(total, q.per);
+  const current = clampPage(q.requested, totalPages);
+  const rows =
+    current === q.requested
+      ? firstRows
+      : await all(env, q.listSql, [...q.mineParams, ...q.params, q.per, (current - 1) * q.per]);
+  attachAuthorBadges(rows, levels, groups);
+  await decoratePosts(env, rows, session);
+  return { rows, total, totalPages, page: current };
+}
+
+export async function fetchPosts(env, url, { where, params = [], size = 10, session = null, levels = [], groups = [] }) {
+  const q = feedQueries(url, { where, params, size, session });
   // COUNT 与当前页数据合并为一次 batch 往返；越界页码才补一次查询，
   // 正常翻页（含最常见的第 1 页）只需一次 D1 往返。
   let countRows;
   let firstRows;
   try {
     const [countRes, rowsRes] = await batchAll(env, [
-      { sql: countSql, params },
-      { sql: listSql, params: [...params, per, (requested - 1) * per] },
+      { sql: q.countSql, params: q.countParams },
+      { sql: q.listSql, params: q.listParams },
     ]);
     countRows = countRes;
     firstRows = rowsRes;
   } catch {
     const [countRow, rows] = await Promise.all([
-      first(env, countSql, params),
-      all(env, listSql, [...params, per, (requested - 1) * per]),
+      first(env, q.countSql, q.countParams),
+      all(env, q.listSql, q.listParams),
     ]);
     countRows = countRow ? [countRow] : [];
     firstRows = rows;
   }
-  const total = countRows[0]?.c || 0;
-  const totalPages = totalPagesOf(total, per);
-  const current = clampPage(requested, totalPages);
-  const rows = current === requested ? firstRows : await all(env, listSql, [...params, per, (current - 1) * per]);
-  attachAuthorBadges(rows, levels, groups);
-  await decoratePosts(env, rows, session);
-  return { rows, total, totalPages, page: current };
+  return finishFeed(env, q, countRows, firstRows, session, levels, groups);
 }
 
 /** 补充信息流卡片所需数据：标签、当前用户点赞/关注状态、转发源文章（合并为一次 batch） */
 export async function decoratePosts(env, rows, session) {
   if (!rows.length) return rows;
   const ids = rows.map((r) => r.pid);
-  const queries = [
-    {
+  // 列表 SQL 已把标签 / 转发源 / 点赞关注状态一并带回时，这里不会再发任何查询（0 次往返）
+  const preTagged = typeof rows[0].tag_json === 'string';
+  const preDecorated = preTagged && 'liked' in rows[0];
+  const queries = [];
+  if (!preTagged) {
+    queries.push({
       key: 'tags',
       sql: `SELECT pt.pid, t.name, t.slug FROM post_tag pt JOIN tag t ON t.tid = pt.tid WHERE pt.pid IN (${placeholders(ids.length)})`,
       params: ids,
-    },
-  ];
-  if (session) {
+    });
+  }
+  if (session && !preDecorated) {
     queries.push({
       key: 'liked',
       sql: `SELECT pid FROM post_like WHERE userid = ? AND pid IN (${placeholders(ids.length)})`,
@@ -364,7 +420,7 @@ export async function decoratePosts(env, rows, session) {
     }
   }
   const repostIds = [...new Set(rows.filter((r) => r.repost_pid).map((r) => r.repost_pid))];
-  if (repostIds.length) {
+  if (!preTagged && repostIds.length) {
     queries.push({
       key: 'sources',
       sql: `SELECT p.pid, p.title, p.content, u.screenname
@@ -377,21 +433,42 @@ export async function decoratePosts(env, rows, session) {
 
   let results;
   try {
-    results = await batchAll(env, queries);
+    results = queries.length ? await batchAll(env, queries) : [];
   } catch {
     results = await Promise.all(queries.map((q) => all(env, q.sql, q.params)));
   }
   const data = Object.fromEntries(queries.map((q, i) => [q.key, results[i] || []]));
 
-  const tagRows = data.tags || [];
-  for (const row of rows) row.tags = tagRows.filter((t) => t.pid === row.pid);
+  if (preTagged) {
+    for (const row of rows) {
+      let tags = [];
+      try {
+        tags = JSON.parse(row.tag_json) || [];
+      } catch {
+        tags = [];
+      }
+      row.tags = tags.filter((t) => t && t.name);
+      // 聚合用的中间字段不留在行对象上，避免混进模板
+      delete row.tag_json;
+    }
+  } else {
+    const tagRows = data.tags || [];
+    for (const row of rows) row.tags = tagRows.filter((t) => t.pid === row.pid);
+  }
 
   if (session) {
-    const likedIds = new Set((data.liked || []).map((r) => r.pid));
-    const followedIds = new Set((data.followed || []).map((r) => r.target_id));
-    for (const row of rows) {
-      row.liked = likedIds.has(row.pid);
-      row.followed = followedIds.has(row.author_id);
+    if (preDecorated) {
+      for (const row of rows) {
+        row.liked = !!row.liked;
+        row.followed = !!row.followed;
+      }
+    } else {
+      const likedIds = new Set((data.liked || []).map((r) => r.pid));
+      const followedIds = new Set((data.followed || []).map((r) => r.target_id));
+      for (const row of rows) {
+        row.liked = likedIds.has(row.pid);
+        row.followed = followedIds.has(row.author_id);
+      }
     }
   } else {
     for (const row of rows) {
@@ -400,8 +477,23 @@ export async function decoratePosts(env, rows, session) {
     }
   }
 
-  const map = new Map((data.sources || []).map((r) => [r.pid, r]));
-  for (const row of rows) row.repost_source = row.repost_pid ? map.get(row.repost_pid) || null : null;
+  if (preDecorated) {
+    for (const row of rows) {
+      let src = null;
+      if (row.repost_json) {
+        try {
+          src = JSON.parse(row.repost_json);
+        } catch {
+          src = null;
+        }
+      }
+      row.repost_source = src;
+      delete row.repost_json;
+    }
+  } else {
+    const map = new Map((data.sources || []).map((r) => [r.pid, r]));
+    for (const row of rows) row.repost_source = row.repost_pid ? map.get(row.repost_pid) || null : null;
+  }
   return rows;
 }
 
@@ -428,32 +520,55 @@ export async function renderList(
   url,
   { where, params, baseUrl, pageTitle, activeSlug, headingTitle, breadcrumb, notice, noticeType, active = 'home' }
 ) {
-  const { session, options, categories, links, nav, hotComments, topics, profile, levels, groups } = await pageCtx(request, env);
+  // 顺序：会话 → 站点设置 → （公共数据 + COUNT + 列表）一次 batch。
+  // 未登录访客没有会话 Cookie，getSession 不产生查询；合并后冷启动从三次串行往返降到两次。
+  // 会话与站点设置互不依赖，并行发出（设置命中实例内 15 秒缓存时不产生查询）；
+  // 之后公共数据 / COUNT / 列表合并成一次 batch，登录用户也只需两次往返。
+  const [session, options] = await Promise.all([getSession(env, request), getOptions(env)]);
+  const q = feedQueries(url, { where, params, size: parseInt(options.pageSize, 10) || 10, session });
+  const { specs, topicsFresh } = commonSpecs(session, null);
+  let data;
+  let feed;
+  try {
+    // GET 请求的公共数据与 COUNT / 列表互不依赖，合并成一趟 D1 batch
+    const results = await batchAll(env, [
+      ...specs,
+      { sql: q.countSql, params: q.countParams },
+      { sql: q.listSql, params: q.listParams },
+    ]);
+    data = assembleCommon(specs, results, { options, session, preloadedGroups: null, topicsFresh });
+    const base = specs.length;
+    feed = await finishFeed(env, q, results[base], results[base + 1], session, data.levels, data.groups);
+  } catch {
+    // 旧库缺表等情况退回逐条查询，行为与合并前一致
+    data = await commonData(env, session);
+    feed = await fetchPosts(env, url, {
+      where,
+      params,
+      size: parseInt(options.pageSize, 10) || 10,
+      session,
+      levels: data.levels,
+      groups: data.groups,
+    });
+  }
+  const { rows, totalPages, page: current } = feed;
   // 回跳提示：默认读取本次地址上的 ?err= / ?msg=（backErr / backMsg 写入），
   // 未传 notice 时所有列表页（首页 / 分类 / 标签 / 搜索）都能显示提示，显式传入时以调用方为准。
   const err = errorOf(url);
   const finalNotice = notice !== undefined ? notice : err || noticeOf(url);
   const finalNoticeType = noticeType !== undefined ? noticeType : err ? 'err' : 'ok';
-  const { rows, totalPages, page: current } = await fetchPosts(env, url, {
-    where,
-    params,
-    size: parseInt(options.pageSize, 10) || 10,
-    session,
-    levels,
-    groups,
-  });
   return html(
     listPage({
-      options,
+      options: data.options,
       session,
       pageTitle,
       posts: rows,
-      categories,
-      hotComments,
-      links,
-      nav,
-      topics,
-      profile,
+      categories: data.categories,
+      hotComments: data.hotComments,
+      links: data.links,
+      nav: data.nav,
+      topics: data.topics,
+      profile: data.profile,
       page: current,
       totalPages,
       baseUrl,

@@ -121,7 +121,7 @@ export function topicLinks(tags = []) {
   return (tags || []).map((t) => `<a href="${e(slugHref('/tag', t.slug))}">#${e(t.name)}#</a>`).join('');
 }
 
-export function postCard(post, options, session) {
+export function postCard(post, options, session, priority = false) {
   const isRepost = !!post.repost_pid;
   const isShort = /^weibo-/.test(post.slug || ''); // 发布框快速发布的微博式短内容
   const src = post.repost_source || null;
@@ -130,7 +130,10 @@ export function postCard(post, options, session) {
   // 「首页大图」对每条卡片都出图（与原主题 index.php 一致）：微博式短文若正文自带配图，
   // 正文里已经展示过，不再叠加封面；纯文字短文与普通文章一样按设置出随机图 / 指定图
   const cover = isShort && firstImage(post.content) ? '' : coverFor(post, options);
-  const coverHtml = cover ? `<a href="${permalink}"><img class="cover" src="${e(cover)}" alt="${e(post.title)}" width="640" height="360" loading="lazy" decoding="async"></a>` : '';
+  // 首屏第一张封面通常是 LCP 元素：去掉 lazy 并提高优先级，其余图片继续保持懒加载
+  const coverHtml = cover
+    ? `<a href="${permalink}"><img class="cover" src="${e(cover)}" alt="${e(post.title)}" width="640" height="360" ${priority ? 'fetchpriority="high"' : 'loading="lazy"'} decoding="async"></a>`
+    : '';
   const topics = topicLinks(post.tags);
   const editLink =
     session && session.role === 'administrator'
@@ -234,7 +237,7 @@ export function commentBlock(comments, post, options, session) {
  */
 export function postCards(posts, options, session) {
   return posts.length
-    ? posts.map((p) => postCard(p, options, session)).join('\n  ')
+    ? posts.map((p, i) => postCard(p, options, session, i === 0)).join('\n  ')
     : '<div class="wb-card wb-empty">还没有内容，去后台或前台写一篇吧～</div>';
 }
 

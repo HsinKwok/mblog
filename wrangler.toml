@@ -29,3 +29,10 @@ database_id = "<YOUR_D1_DATABASE_ID>"
 [assets]
 directory = "./public"
 binding = "ASSETS"
+
+# 样式表以文本模块引入（src/theme/layout.js 内联进 <head>），
+# 首屏因此少一次渲染阻塞的 CSS 往返
+[[rules]]
+type = "Text"
+globs = ["**/*.css"]
+fallthrough = true

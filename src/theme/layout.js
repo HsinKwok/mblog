@@ -1,4 +1,7 @@
 import { escapeHtml as e, excerpt, avatarFor, safeUrl, frontUrl, slugHref, SOFT_SYNC, badgeHtml, honorHtml, optionOn } from '../lib.js';
+// 主题样式表由 Wrangler 作为文本模块打进 Worker，直接内联进 <head>：
+// 首屏少一次渲染阻塞的 CSS 往返（24 KB，br 压缩后约 7 KB）
+import weiboCss from '../../public/style/weibo.css';
 
 /**
  * 徽章区（两个图标位）：位 1 为等级徽章，图标集随用户所属用户组切换，同一时刻只占一个图标位；
@@ -30,8 +33,28 @@ function bodyStyleOf(options) {
   return `background: url(${e(bg)}) no-repeat top center; background-attachment: fixed; background-size: cover;`;
 }
 
-export function head(options, pageTitle, extraHead = '', bodyStyle = '', frontScript = true) {
+/**
+ * 首屏外链图片的预连接：资料卡头像由后台填写（常见是 qlogo.cn 之类的图床），
+ * 不提前建连就要等 HTML 解析到 <img> 才开始 DNS + TLS，直接拖慢 LCP。
+ * 相对地址 / 非法地址返回空串。
+ */
+function originOf(raw) {
+  const url = safeUrl(raw);
+  if (!url.startsWith('http')) return '';
+  try {
+    return new URL(url).origin;
+  } catch {
+    return '';
+  }
+}
+
+export function head(options, pageTitle, extraHead = '', bodyStyle = '', frontScript = true, publisherCss = false) {
   const favicon = options.faviconUrl || '/favicon.ico';
+  // 文章头像走 cravatar，资料卡头像走后台填写的图床，两处都提前建连（同一域名只留一份）
+  const preconnects = [...new Set(['https://cravatar.com', originOf(options.headImgUrl)])].filter(Boolean);
+  const preconnectTags = preconnects
+    .map((o) => `<link rel="preconnect" href="${e(o)}" crossorigin>\n<link rel="dns-prefetch" href="${e(o)}">`)
+    .join('\n');
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -43,12 +66,11 @@ export function head(options, pageTitle, extraHead = '', bodyStyle = '', frontSc
 <link rel="shortcut icon" type="image/ico" href="${e(favicon)}">
 <link rel="icon" sizes="192x192" href="${e(favicon)}">
 <link rel="apple-touch-icon" href="${e(favicon)}">
-<link rel="preconnect" href="https://cravatar.com" crossorigin>
-<link rel="dns-prefetch" href="https://cravatar.com">
+${preconnectTags}
 <meta name="description" content="${e(options.description)}">
 <meta name="keywords" content="${e(options.keywords)}">
-<link rel="stylesheet" href="/style/weibo.css" type="text/css">
-<link rel="stylesheet" href="/style/publisher.css" type="text/css">
+<style>${weiboCss}</style>
+${publisherCss ? '<link rel="stylesheet" href="/style/publisher.css" type="text/css">' : ''}
 ${frontScript ? '<script src="/js/app.js" defer></script>' : ''}
 ${extraHead}${SOFT_SYNC}
 ${options.optionHeader || ''}
@@ -218,7 +240,7 @@ export function profileCard(options, profile = {}, session, hideMeta = false, ex
   const name = profile.name || options.title;
   const avatar = profile.avatar || options.headImgUrl || '';
   const desc = profile.desc || '';
-  const cardBg = styleUrl(options.cardBgUrl, '/images/cardBg.jpg');
+  const cardBg = styleUrl(options.cardBgUrl, '/images/cardBg.webp');
 
   const stats = (profile.stats || [])
     .map((s) => {
@@ -241,7 +263,7 @@ export function profileCard(options, profile = {}, session, hideMeta = false, ex
 
   return `<div class="wb-card wb-profile">
     <div class="wb-profile-cover" style="background-image:url(${e(cardBg)})"></div>
-    <a class="wb-profile-avatar" href="${isUser ? '/write/mine' : '/'}">${avatar ? `<img src="${e(avatar)}" alt="${e(name)}">` : ''}</a>
+    <a class="wb-profile-avatar" href="${isUser ? '/write/mine' : '/'}">${avatar ? `<img src="${e(avatar)}" alt="${e(name)}" width="72" height="72" fetchpriority="high" decoding="async">` : ''}</a>
     ${hideMeta ? '' : `<a class="wb-profile-name" href="${isUser ? '/write/mine' : '/'}">${e(name)}${isUser ? badgeSlots(profile.badge, profile.honor) : ''}</a>`}
     ${desc && !hideMeta ? `<div class="wb-profile-desc">${e(desc)}</div>` : ''}
     ${isUser || hideMeta ? '' : siteItems(options)}
@@ -366,10 +388,10 @@ ${options.optionFooter || ''}
 }
 
 /** 页面骨架：顶栏 + 三栏 + 页脚 */
-export function shell({ options, session, pageTitle, active = '', center, categories = [], profile = {}, topics = [], hotComments = [], links = [], nav = [], activeSlug = '', focus = false }) {
+export function shell({ options, session, pageTitle, active = '', center, categories = [], profile = {}, topics = [], hotComments = [], links = [], nav = [], activeSlug = '', focus = false, publisher = false }) {
   const bodyStyle = bodyStyleOf(options);
   if (focus) {
-    return `${head(options, pageTitle, '', bodyStyle)}
+    return `${head(options, pageTitle, '', bodyStyle, true, publisher)}
 ${topbar(options, session, active, nav)}
 <div class="wb-container wb-container-focus">
   <main class="wb-center">
@@ -378,7 +400,7 @@ ${topbar(options, session, active, nav)}
 </div>
 ${footer(options)}`;
   }
-  return `${head(options, pageTitle, '', bodyStyle)}
+  return `${head(options, pageTitle, '', bodyStyle, true, publisher)}
 ${topbar(options, session, active, nav)}
 <div class="wb-container">
   <aside class="wb-left">
