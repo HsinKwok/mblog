@@ -165,7 +165,7 @@ export function postCard(post, options, session, priority = false) {
 
   return `<article class="wb-card wb-post">
     <div class="wb-post-row">
-      <a class="wb-post-avatar" href="/"><img src="${e(avatarFor({ headpic: post.author_headpic, mail: post.author_mail }, 100))}" alt="${e(post.screenname || options.yourNickname)}" loading="lazy" decoding="async"></a>
+      <a class="wb-post-avatar" href="/"><img src="${e(avatarFor({ headpic: post.author_headpic, mail: post.author_mail }, 100))}" alt="${e(post.screenname || options.yourNickname)}" width="52" height="52" loading="lazy" decoding="async"></a>
       <div class="wb-post-main">
         <div class="wb-post-head">
           <a class="wb-post-name" href="/">${e(post.screenname || options.yourNickname)}</a>
@@ -196,7 +196,7 @@ export function commentItem(c, index = 0) {
     ? `<a href="${e(homepage)}" target="_blank" rel="noopener noreferrer">${e(c.author)}</a>`
     : `${e(c.author)}`;
   return `<div class="wb-comment-item">
-    <img src="${e(avatarFor({ mail: c.mail }, 80))}" alt="${e(c.author)}" loading="lazy" decoding="async">
+    <img src="${e(avatarFor({ mail: c.mail }, 80))}" alt="${e(c.author)}" width="40" height="40" loading="lazy" decoding="async">
     <div>
       <div class="cc">${e(c.content)}</div>
       <div class="cm">

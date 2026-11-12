@@ -204,14 +204,16 @@ export async function minimalData(env) {
 
 /* ---------------- 匿名访问的边缘缓存 ---------------- */
 
-const EDGE_TTL = 60; // 内容新鲜期
-const EDGE_STALE = 300; // 过期后仍可继续返回的时长（手工实现 stale-while-revalidate）
+const EDGE_TTL = 300; // 内容新鲜期：个人博客更新频率低，回源渲染次数因此降到原来的 1/5
+const EDGE_STALE = 900; // 过期后仍可继续返回的时长（手工实现 stale-while-revalidate）
+// 浏览器侧仍只缓存 60 秒：后台改动最多一分钟就能被看到，不会长时间停在旧页面
+const BROWSER_TTL = 60;
 
 /** 对外响应：去掉内部时间戳，并按新鲜期给浏览器一个较短的缓存时间 */
 function edgeServe(entry, ttl) {
   const headers = new Headers(entry.headers);
   headers.delete('x-render-at');
-  headers.set('cache-control', `public, max-age=${ttl}`);
+  headers.set('cache-control', `public, max-age=${Math.min(ttl, BROWSER_TTL)}`);
   return new Response(entry.body, { status: entry.status, headers });
 }
 
@@ -389,9 +391,11 @@ export async function fetchPosts(env, url, { where, params = [], size = 10, sess
   return finishFeed(env, q, countRows, firstRows, session, levels, groups);
 }
 
-/** 补充信息流卡片所需数据：标签、当前用户点赞/关注状态、转发源文章（合并为一次 batch） */
-export async function decoratePosts(env, rows, session) {
-  if (!rows.length) return rows;
+/**
+ * 卡片装饰查询清单：标签、当前用户点赞/关注状态、转发源文章。
+ * 列表 SQL 已经带回的字段不再查询；详情页会把这几条并进自己的 batch，省掉一轮往返。
+ */
+function decorateQueries(rows, session) {
   const ids = rows.map((r) => r.pid);
   // 列表 SQL 已把标签 / 转发源 / 点赞关注状态一并带回时，这里不会再发任何查询（0 次往返）
   const preTagged = typeof rows[0].tag_json === 'string';
@@ -431,14 +435,11 @@ export async function decoratePosts(env, rows, session) {
     });
   }
 
-  let results;
-  try {
-    results = queries.length ? await batchAll(env, queries) : [];
-  } catch {
-    results = await Promise.all(queries.map((q) => all(env, q.sql, q.params)));
-  }
-  const data = Object.fromEntries(queries.map((q, i) => [q.key, results[i] || []]));
+  return { queries, preTagged, preDecorated };
+}
 
+/** 把 decorateQueries 的结果写回行对象 */
+function applyDecorations(rows, data, session, preTagged, preDecorated) {
   if (preTagged) {
     for (const row of rows) {
       let tags = [];
@@ -494,6 +495,20 @@ export async function decoratePosts(env, rows, session) {
     const map = new Map((data.sources || []).map((r) => [r.pid, r]));
     for (const row of rows) row.repost_source = row.repost_pid ? map.get(row.repost_pid) || null : null;
   }
+}
+
+/** 单独使用时补一次 batch；列表页与详情页已把查询并入各自的 batch，不会走到这里 */
+export async function decoratePosts(env, rows, session) {
+  if (!rows.length) return rows;
+  const { queries, preTagged, preDecorated } = decorateQueries(rows, session);
+  let results;
+  try {
+    results = queries.length ? await batchAll(env, queries) : [];
+  } catch {
+    results = await Promise.all(queries.map((q) => all(env, q.sql, q.params)));
+  }
+  const data = Object.fromEntries(queries.map((q, i) => [q.key, results[i] || []]));
+  applyDecorations(rows, data, session, preTagged, preDecorated);
   return rows;
 }
 
@@ -717,19 +732,38 @@ export async function countView(request, env, post, ctx) {
 }
 
 export async function renderSingle(request, env, post, breadcrumb, extra = {}) {
-  const { session, options, categories, links, nav, hotComments, topics, profile, levels, groups } = await pageCtx(
-    request,
-    env,
-    extra.session,
-    extra.groups || null
-  );
-  attachAuthorBadges([post], levels, groups);
-  // 评论列表与卡片装饰互不依赖，并行查询，避免详情页多等一轮
-  const [, comments] = await Promise.all([
-    // 标签 / 点赞状态 / 转发源 / 点赞数与转发数
-    decoratePosts(env, [post], session),
-    all(env, "SELECT * FROM comment WHERE pid = ? AND status = 'approved' ORDER BY coid ASC", [post.pid]),
+  // 会话与站点设置并行（设置命中实例内缓存时不产生查询）；
+  // 公共数据、卡片装饰（标签 / 点赞 / 关注 / 转发源）与评论合并成一次 batch：
+  // 详情页原来要四次串行往返，现在两次，登录用户也不再比匿名多等好几轮。
+  const [session, options] = await Promise.all([
+    extra.session !== undefined ? extra.session : getSession(env, request),
+    getOptions(env),
   ]);
+  const commentSql = "SELECT * FROM comment WHERE pid = ? AND status = 'approved' ORDER BY coid ASC";
+  const common = commonSpecs(session, extra.groups || null);
+  const { queries: decorateQs, preTagged, preDecorated } = decorateQueries([post], session);
+  const base = common.specs.length;
+  let data;
+  let comments;
+  try {
+    const results = await batchAll(env, [...common.specs, ...decorateQs, { sql: commentSql, params: [post.pid] }]);
+    data = assembleCommon(common.specs, results, {
+      options,
+      session,
+      preloadedGroups: extra.groups || null,
+      topicsFresh: common.topicsFresh,
+    });
+    const decorateData = Object.fromEntries(decorateQs.map((q, i) => [q.key, results[base + i] || []]));
+    applyDecorations([post], decorateData, session, preTagged, preDecorated);
+    comments = results[base + decorateQs.length] || [];
+  } catch {
+    // 旧库缺表等情况退回逐条查询，行为与合并前一致
+    data = await commonData(env, session, extra.groups || null);
+    await decoratePosts(env, [post], session);
+    comments = await all(env, commentSql, [post.pid]);
+  }
+  const { categories, links, nav, hotComments, topics, profile, levels, groups } = data;
+  attachAuthorBadges([post], levels, groups);
   const url = new URL(request.url);
   const err = errorOf(url);
   const msg = noticeOf(url);

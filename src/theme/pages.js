@@ -341,7 +341,7 @@ export function settingsPage({
       </div>
       <div class="field"><label>头像地址（留空则使用邮箱头像）</label><input type="text" name="headpic" value="${e(session.headpic || '')}"></div>
       <div class="wb-set-preview">
-        <img src="${e(avatarFor(session, 100))}" alt="当前头像" loading="lazy" decoding="async">
+        <img src="${e(avatarFor(session, 100))}" alt="当前头像" width="48" height="48" loading="lazy" decoding="async">
         <span class="muted">当前头像</span>
       </div>
       <h2>修改密码</h2>

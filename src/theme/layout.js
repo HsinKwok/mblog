@@ -146,7 +146,7 @@ export function topbar(options, session, active, navRows = []) {
   if (optionOn(options, 'loginButtonOpen')) {
     if (session) {
       right = `<div class="wb-user">
-          <img src="${e(avatarFor(session, 60))}" alt="${e(session.screenname || session.username)}">
+          <img src="${e(avatarFor(session, 60))}" alt="${e(session.screenname || session.username)}" width="32" height="32">
           <span>${e(session.screenname || session.username)}</span>
         </div>`;
       if (session.role === 'administrator') {
@@ -347,7 +347,7 @@ function rightColumn(options, links = [], hotComments = [], topics = []) {
     ${hotComments
       .map(
         (c) => `<div class="wb-cmt">
-      <img src="${e(avatarFor({ mail: c.mail }, 60))}" alt="${e(c.author)}" loading="lazy" decoding="async">
+      <img src="${e(avatarFor({ mail: c.mail }, 60))}" alt="${e(c.author)}" width="40" height="40" loading="lazy" decoding="async">
       <div>
         <div class="cn">${e(c.author)}</div>
         <div class="ct"><a href="${e(frontUrl(c))}">${e(excerpt(c.content, 24))}</a></div>
